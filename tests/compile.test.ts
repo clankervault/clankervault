@@ -69,6 +69,38 @@ describe('anchors + availability', () => {
     expect(line).toContain('/Volumes/NAS/footage/x');                // {nas} expanded
     expect(ctx.device.device).toBe('mini');
   });
+
+  it('leaves unknown anchors literal', () => {
+    const r = createRecord(dir, p.id, {
+      type: 'fact', title: 'Mystery path',
+      body: 'See {nonexistent}/x for details.',
+    });
+    const ctx = gatherContext(dir, p);
+    const line = ctx.records.fact.find((l) => l.includes(r.meta.id))!;
+    expect(line).toContain('{nonexistent}/x');
+  });
+
+  it('expands anchors in global taste lines too', () => {
+    writeFileSync(join(dir, 'device.yaml'),
+      `device: mini\nanchors:\n  nas: /Volumes/NAS\nprojects:\n  ${p.id}: /Users/mac/Development/demo\n`);
+    writeFileSync(join(dir, 'me', 'taste', 'paths.md'), '# Paths\n\nFonts live in {nas}/fonts\n');
+    const ctx = gatherContext(dir, p);
+    expect(ctx.globalTaste[0]).toContain('/Volumes/NAS/fonts');
+  });
+
+  it('flags availability as not tracked when the device key is absent from the map', () => {
+    writeFileSync(join(dir, 'device.yaml'),
+      `device: mini\nanchors:\n  nas: /Volumes/NAS\nprojects:\n  ${p.id}: /Users/mac/Development/demo\n`);
+    const r = createRecord(dir, p.id, {
+      type: 'fact', title: 'Untracked asset',
+      body: 'Some asset.',
+    });
+    const raw = readFileSync(r.path, 'utf8');
+    writeFileSync(r.path, raw.replace('tags: []', 'tags: []\navailability:\n  macbook: "/local/path"'));
+    const ctx = gatherContext(dir, p);
+    const line = ctx.records.fact[0];
+    expect(line).toMatch(/availability not tracked for mini/);
+  });
 });
 
 describe('applyBudget', () => {

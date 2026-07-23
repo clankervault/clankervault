@@ -28,26 +28,34 @@ export function condense(r: VaultRecord): string {
     : `- ${r.title} [${r.meta.id}]`;
 }
 
-/** spec §7: {project_root} from device.projects, {name} from device.anchors; unknown stay literal */
+/**
+ * spec §7: {project_root} from device.projects, {name} from device.anchors; unknown stay literal.
+ * Anchor names are lowercase by convention; matching is case-sensitive.
+ */
 export function expandAnchors(text: string, device: DeviceConfig, projectId: string): string {
-  return text.replace(/\{([a-z0-9_:-]+)\}/gi, (whole, name: string) => {
+  return text.replace(/\{([a-z0-9_:-]+)\}/g, (whole, name: string) => {
     if (name === 'project_root') return device.projects[projectId] ?? whole;
     return device.anchors[name] ?? whole;
   });
 }
 
-/** spec §7: contextual availability note for the current device */
+/**
+ * spec §7: contextual availability note for the current device.
+ * Explicit null = confirmed absent; device missing from the map = not tracked (unknown).
+ */
 function availabilityNote(r: VaultRecord, device: DeviceConfig): string | null {
   const av = r.meta.availability;
   if (!av) return null;
+  const tracked = device.device in av;
   const here = av[device.device];
   const elsewhere = Object.entries(av)
     .filter(([d]) => d !== device.device)
     .map(([d, p]) => (p ? `${d}: ${p}` : `${d}: not there`))
     .join(', ');
-  return here
-    ? `(on this device: ${here}${elsewhere ? `; also ${elsewhere}` : ''})`
-    : `(NOT on this device (${device.device}); ${elsewhere || 'location unknown'})`;
+  if (here) return `(on this device: ${here}${elsewhere ? `; also ${elsewhere}` : ''})`;
+  return tracked
+    ? `(NOT on this device (${device.device}); ${elsewhere || 'location unknown'})`
+    : `(availability not tracked for ${device.device}; ${elsewhere || 'location unknown'})`;
 }
 
 function readBody(file: string): string | null {
@@ -83,8 +91,8 @@ export function gatherContext(vaultDir: string, project: ProjectInfo): CompiledC
       const body = readBody(join(tasteDir, f));
       if (!body) continue;
       const title = body.match(/^#\s+(.+)$/m)?.[1] ?? f.replace(/\.md$/, '');
-      const line = firstMeaningfulLine(body.replace(/^#.+$/m, ''));
-      globalTaste.push(line ? `- ${title}: ${line}` : `- ${title}`);
+      const tasteLine = firstMeaningfulLine(body.replace(/^#.+$/m, ''));
+      globalTaste.push(expandAnchors(tasteLine ? `- ${title}: ${tasteLine}` : `- ${title}`, device, project.id));
     }
   }
 
