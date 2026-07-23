@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import matter from 'gray-matter';
 import type { ProjectInfo, ProjectKind, ProjectRoot } from './types.js';
@@ -59,6 +59,21 @@ export function getProject(vaultDir: string, ref: string): ProjectInfo | null {
   );
 }
 
+/**
+ * resolve() plus realpath, so paths reached through a symlink (e.g. macOS
+ * /tmp -> /private/tmp, /var -> /private/var) compare equal to how a real
+ * process.cwd() reports them. Falls back to plain resolve() for paths that
+ * do not exist on disk (a configured root that has not been mounted yet).
+ */
+function canonical(p: string): string {
+  const abs = resolve(p);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
 export function normalizeGitUrl(url: string): string {
   return url
     .trim().toLowerCase()
@@ -89,7 +104,7 @@ function findVaultIdFile(cwd: string): string | null {
 
 export function resolveProjectFromCwd(vaultDir: string, cwd: string): ProjectInfo | null {
   const projects = listProjects(vaultDir);
-  const abs0 = resolve(cwd);
+  const abs0 = canonical(cwd);
 
   // 1. explicit .vault-id marker wins
   const marked = findVaultIdFile(cwd);
@@ -101,7 +116,7 @@ export function resolveProjectFromCwd(vaultDir: string, cwd: string): ProjectInf
   // 2. device.yaml projects map (local, per-device path mapping - spec §7)
   const device = readDeviceConfig(vaultDir);
   for (const [id, root] of Object.entries(device.projects)) {
-    const rootAbs = resolve(root);
+    const rootAbs = canonical(root);
     if (abs0 === rootAbs || abs0.startsWith(rootAbs + sep)) {
       const p = projects.find((p) => p.id === id);
       if (p) return p;
@@ -122,7 +137,7 @@ export function resolveProjectFromCwd(vaultDir: string, cwd: string): ProjectInf
   for (const p of projects) {
     for (const r of p.roots) {
       if (!r.path) continue;
-      const rootAbs = resolve(r.path);
+      const rootAbs = canonical(r.path);
       if (abs === rootAbs || abs.startsWith(rootAbs + sep)) return p;
     }
   }
