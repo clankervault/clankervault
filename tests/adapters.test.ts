@@ -1,0 +1,55 @@
+import { describe, it, expect } from 'vitest';
+import { adapters, getAdapter } from '../src/adapters/index.js';
+import type { CompiledContext } from '../src/types.js';
+
+const ctx: CompiledContext = {
+  project: {
+    id: 'demo-a1b2', name: 'Demo', aliases: [], kind: 'code', roots: [],
+    facts: '# Demo\n\n## Facts\nDeploy: Vercel, branch main', dir: '/x',
+  },
+  device: { device: 'macbook', anchors: {}, projects: {} },
+  profile: 'Czech dev, answer in Czech.',
+  globalTaste: ['- No em-dashes'],
+  records: {
+    fact: ['- Deploy Vercel [fct-2026-07-23-aaaa]'],
+    recipe: ['- Export shorts: ffmpeg -crf 18 [rcp-2026-07-23-bbbb]'],
+    decision: ['- Drizzle over Prisma [dec-2026-07-23-cccc]'],
+    taste: [],
+  },
+  unconfirmed: ['- Fresh mined thing [rcp-2026-07-23-dddd]'],
+  state: 'Refactoring payments, refund flow left.',
+  droppedCount: 0,
+};
+
+describe('adapter registry', () => {
+  it('exposes claude, agents, cursor', () => {
+    expect(Object.keys(adapters).sort()).toEqual(['agents', 'claude', 'cursor']);
+    expect(getAdapter('claude').filename).toBe('CLAUDE.md');
+    expect(getAdapter('agents').filename).toBe('AGENTS.md');
+    expect(getAdapter('cursor').filename).toBe('.cursorrules');
+    expect(() => getAdapter('zed')).toThrow(/claude/);
+  });
+});
+
+describe('rendering', () => {
+  for (const name of ['claude', 'agents', 'cursor'] as const) {
+    it(`${name}: GENERATED header + all sections + id refs`, () => {
+      const out = getAdapter(name).render(ctx);
+      expect(out).toMatch(/GENERATED/);
+      expect(out).toContain('Deploy Vercel');
+      expect(out).toContain('ffmpeg -crf 18');
+      expect(out).toContain('Drizzle over Prisma');
+      expect(out).toContain('Refactoring payments');
+      expect(out).toContain('No em-dashes');
+      expect(out).toContain('Czech dev');
+      expect(out).toContain('[rcp-2026-07-23-dddd]');
+      expect(out).toMatch(/grain of salt/i);
+    });
+  }
+  it('omits empty sections', () => {
+    const empty = { ...ctx, state: null, unconfirmed: [], records: { ...ctx.records, taste: [], recipe: [] } };
+    const out = getAdapter('claude').render(empty);
+    expect(out).not.toMatch(/## State/);
+    expect(out).not.toMatch(/grain of salt/i);
+  });
+});
