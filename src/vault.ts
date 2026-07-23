@@ -60,6 +60,7 @@ export function readDeviceConfig(dir: string): DeviceConfig {
     device: raw.device ?? defaultDeviceName(),
     anchors: raw.anchors ?? {},
     projects: raw.projects ?? {},
+    sync: raw.sync ?? undefined,
   };
 }
 

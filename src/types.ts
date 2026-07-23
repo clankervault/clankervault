@@ -23,10 +23,17 @@ export interface RecordMeta {
   availability?: Record<string, string | null> | null;
 }
 
+export interface DeviceSyncConfig {
+  backend: 'dir';
+  path: string;              // where the encrypted remote lives (mounted folder)
+  passphrase?: string;       // or env VAULT_PASSPHRASE
+}
+
 export interface DeviceConfig {
   device: string;                     // e.g. "macbook"
   anchors: Record<string, string>;    // e.g. { nas: "/Volumes/NAS" }
   projects: Record<string, string>;   // project id → local root path
+  sync?: DeviceSyncConfig;
 }
 
 export interface VaultRecord {
