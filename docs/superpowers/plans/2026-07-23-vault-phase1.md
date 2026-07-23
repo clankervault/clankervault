@@ -405,7 +405,7 @@ export function initVault(dir: string): void {
   mkdirSync(join(dir, 'projects'), { recursive: true });
   writeFileSync(
     join(dir, 'vault.yaml'),
-    `# Vault settings — https://github.com/tadeasraska/vault\nspec_version: 1\ncompile:\n  token_budget: 4000\n`,
+    `# Vault settings - https://github.com/tadeasraska/vault\nspec_version: 1\ncompile:\n  token_budget: 4000\n`,
   );
   writeFileSync(
     join(dir, 'me', 'profile.md'),
@@ -420,7 +420,7 @@ function defaultDeviceName(): string {
 
 function deviceTemplate(): string {
   return (
-    `# Per-device settings — NEVER synced between machines (spec §7).\n` +
+    `# Per-device settings - NEVER synced between machines (spec §7).\n` +
     `# Anchors map {name} placeholders in records to local paths.\n` +
     `device: ${defaultDeviceName()}\n` +
     `anchors: {}\n` +
@@ -648,7 +648,7 @@ export function supersedeRecord(
   const old = findRecord(vaultDir, projectId, oldId);
   if (!old) throw new Error(`Record ${oldId} not found in project ${projectId}`);
   const created = createRecord(vaultDir, projectId, input);
-  // rewrite frontmatter only — body stays untouched (append-only rule)
+  // rewrite frontmatter only - body stays untouched (append-only rule)
   const raw = matter(readFileSync(old.path, 'utf8'));
   raw.data.status = 'superseded';
   raw.data.superseded_by = created.meta.id;
@@ -867,7 +867,7 @@ export function resolveProjectFromCwd(vaultDir: string, cwd: string): ProjectInf
     if (p) return p;
   }
 
-  // 2. device.yaml projects map (local, per-device path mapping — spec §7)
+  // 2. device.yaml projects map (local, per-device path mapping - spec §7)
   const device = readDeviceConfig(vaultDir);
   for (const [id, root] of Object.entries(device.projects)) {
     const rootAbs = resolve(root);
@@ -919,7 +919,7 @@ git add -A && git commit -m "Add project layer: creation, lookup and cwd identit
 **Interfaces:**
 - Consumes: `listRecords` from records; `ProjectInfo`, `CompiledContext`, `VaultRecord` types; `estimateTokens` from util.
 - Produces:
-  - `condense(r: VaultRecord): string` — one line: `- <title> — <first body line, ≤160 chars> [<id>]`
+  - `condense(r: VaultRecord): string` — one line: `- <title>: <first body line, ≤160 chars> [<id>]`
   - `expandAnchors(text: string, device: DeviceConfig, projectId: string): string` — replaces `{project_root}` (from `device.projects`) and `{name}` (from `device.anchors`); unknown anchors stay literal
   - `gatherContext(vaultDir: string, project: ProjectInfo): CompiledContext` — reads `device.yaml` itself, sets `ctx.device`, expands anchors in every condensed line/state, and appends an availability note to records that carry `availability` frontmatter ("NOT on this device (mini); macbook: …, nas: …")
   - `applyBudget(ctx: CompiledContext, budget: number): CompiledContext` — cuts record lines by priority profile, sets `droppedCount`
@@ -1057,30 +1057,34 @@ function firstMeaningfulLine(body: string): string {
 export function condense(r: VaultRecord): string {
   const detail = firstMeaningfulLine(r.body);
   return detail
-    ? `- ${r.title} — ${detail} [${r.meta.id}]`
+    ? `- ${r.title}: ${detail} [${r.meta.id}]`
     : `- ${r.title} [${r.meta.id}]`;
 }
 
-/** spec §7: {project_root} from device.projects, {name} from device.anchors; unknown stay literal */
+/** spec §7: {project_root} from device.projects, {name} from device.anchors; unknown stay literal.
+ *  Anchor names are lowercase by convention; matching is case-sensitive. */
 export function expandAnchors(text: string, device: DeviceConfig, projectId: string): string {
-  return text.replace(/\{([a-z0-9_:-]+)\}/gi, (whole, name: string) => {
+  return text.replace(/\{([a-z0-9_:-]+)\}/g, (whole, name: string) => {
     if (name === 'project_root') return device.projects[projectId] ?? whole;
     return device.anchors[name] ?? whole;
   });
 }
 
-/** spec §7: contextual availability note for the current device */
+/** spec §7: contextual availability note for the current device.
+ *  Explicit null = confirmed absent; device missing from the map = not tracked (unknown). */
 function availabilityNote(r: VaultRecord, device: DeviceConfig): string | null {
   const av = r.meta.availability;
   if (!av) return null;
+  const tracked = device.device in av;
   const here = av[device.device];
   const elsewhere = Object.entries(av)
     .filter(([d]) => d !== device.device)
     .map(([d, p]) => (p ? `${d}: ${p}` : `${d}: not there`))
     .join(', ');
-  return here
-    ? `(on this device: ${here}${elsewhere ? `; also ${elsewhere}` : ''})`
-    : `(NOT on this device (${device.device}); ${elsewhere || 'location unknown'})`;
+  if (here) return `(on this device: ${here}${elsewhere ? `; also ${elsewhere}` : ''})`;
+  return tracked
+    ? `(NOT on this device (${device.device}); ${elsewhere || 'location unknown'})`
+    : `(availability not tracked for ${device.device}; ${elsewhere || 'location unknown'})`;
 }
 
 function readBody(file: string): string | null {
@@ -1116,8 +1120,8 @@ export function gatherContext(vaultDir: string, project: ProjectInfo): CompiledC
       const body = readBody(join(tasteDir, f));
       if (!body) continue;
       const title = body.match(/^#\s+(.+)$/m)?.[1] ?? f.replace(/\.md$/, '');
-      const line = firstMeaningfulLine(body.replace(/^#.+$/m, ''));
-      globalTaste.push(line ? `- ${title} — ${line}` : `- ${title}`);
+      const tasteLine = firstMeaningfulLine(body.replace(/^#.+$/m, ''));
+      globalTaste.push(expandAnchors(tasteLine ? `- ${title}: ${tasteLine}` : `- ${title}`, device, project.id));
     }
   }
 
@@ -1206,7 +1210,7 @@ const ctx: CompiledContext = {
   globalTaste: ['- No em-dashes'],
   records: {
     fact: ['- Deploy Vercel [fct-2026-07-23-aaaa]'],
-    recipe: ['- Export shorts — ffmpeg -crf 18 [rcp-2026-07-23-bbbb]'],
+    recipe: ['- Export shorts: ffmpeg -crf 18 [rcp-2026-07-23-bbbb]'],
     decision: ['- Drizzle over Prisma [dec-2026-07-23-cccc]'],
     taste: [],
   },
@@ -1277,7 +1281,7 @@ export function getAdapter(name: string): Adapter {
 }
 
 export const GENERATED_HEADER =
-  '<!-- GENERATED by vault — do not edit. Regenerate with `vault compile`. -->';
+  '<!-- GENERATED by vault - do not edit. Regenerate with `vault compile`. -->';
 
 /** shared section layout for markdown-based targets */
 export function renderMarkdownBody(ctx: CompiledContext): string {
@@ -1289,7 +1293,7 @@ export function renderMarkdownBody(ctx: CompiledContext): string {
   if (ctx.records.recipe.length) parts.push(`## Recipes (how things are done here)\n\n${ctx.records.recipe.join('\n')}`);
   if (ctx.records.decision.length) parts.push(`## Decisions\n\n${ctx.records.decision.join('\n')}`);
   if (ctx.records.fact.length) parts.push(`## Facts\n\n${ctx.records.fact.join('\n')}`);
-  if (ctx.unconfirmed.length) parts.push(`## Recent (unconfirmed — take with a grain of salt)\n\n${ctx.unconfirmed.join('\n')}`);
+  if (ctx.unconfirmed.length) parts.push(`## Recent (unconfirmed, take with a grain of salt)\n\n${ctx.unconfirmed.join('\n')}`);
   if (ctx.profile) parts.push(`## About the user\n\n${ctx.profile}`);
   if (ctx.droppedCount > 0) parts.push(`<!-- ${ctx.droppedCount} records omitted by token budget; full detail lives in the vault -->`);
   return parts.join('\n\n') + '\n';
@@ -1329,7 +1333,7 @@ import { renderMarkdownBody } from './index.js';
 export const cursor: Adapter = {
   name: 'cursor',
   filename: '.cursorrules',
-  render: (ctx) => `# GENERATED by vault — do not edit. Regenerate with \`vault compile\`.\n\n${renderMarkdownBody(ctx)}`,
+  render: (ctx) => `# GENERATED by vault - do not edit. Regenerate with \`vault compile\`.\n\n${renderMarkdownBody(ctx)}`,
 };
 ```
 
@@ -1373,7 +1377,7 @@ import type { ProjectInfo, RecordType } from './types.js';
 const program = new Command();
 program
   .name('vault')
-  .description('Portable memory for AI tools — one markdown vault, compiled into CLAUDE.md, AGENTS.md, .cursorrules.')
+  .description('Portable memory for AI tools: one markdown vault, compiled into CLAUDE.md, AGENTS.md, .cursorrules.')
   .option('--vault <dir>', 'vault directory (default: $VAULT_DIR or ~/vault)');
 
 function vaultDir(): string {
@@ -1389,7 +1393,7 @@ function needProject(ref: string | undefined): ProjectInfo {
     console.error(
       ref
         ? `Project "${ref}" not found.\nKnown projects:\n${known || '  (none)'}`
-        : `Could not resolve a project from ${process.cwd()}.\nUse --project <id>, or add a root/.vault-id to one of:\n${known || '  (none — create one with `vault project new <name>`)'}`,
+        : `Could not resolve a project from ${process.cwd()}.\nUse --project <id>, or add a root/.vault-id to one of:\n${known || '  (none, create one with `vault project new <name>`)'}`,
     );
     process.exit(1);
   }
@@ -1531,11 +1535,17 @@ program
       writeFileSync(target, adapter.render(ctx));
       console.log(`wrote ${target}`);
     }
-    if (ctx.droppedCount) console.log(`(${ctx.droppedCount} records over budget omitted — raise compile.token_budget in vault.yaml if needed)`);
+    if (ctx.droppedCount) console.log(`(${ctx.droppedCount} records over budget omitted, raise compile.token_budget in vault.yaml if needed)`);
     console.log('Remember: generated files belong in .gitignore.');
   });
 
-program.parse();
+// expected user errors (no vault yet, vault exists, ...) print one clean line, not a stack trace
+try {
+  program.parse();
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
 ```
 
 - [ ] **Step 2: Write end-to-end smoke test**
@@ -1574,6 +1584,15 @@ describe('vault CLI end to end', () => {
       expect(content).toContain('GENERATED');
       expect(content).toContain('Deploy on Vercel');
     }
+  });
+
+  it('prints a clean one-line error, not a stack trace, on init over an existing vault', () => {
+    const vault = join(tmpDir(), 'v');
+    run(['init', vault]);
+    const r = run(['init', vault]);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/already exists/i);
+    expect(r.out).not.toMatch(/at .*cli\.ts/);
   });
 
   it('rejects unknown record type with guidance', () => {
