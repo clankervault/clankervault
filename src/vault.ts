@@ -28,7 +28,7 @@ export function initVault(dir: string): void {
   mkdirSync(join(dir, 'projects'), { recursive: true });
   writeFileSync(
     join(dir, 'vault.yaml'),
-    `# Vault settings — https://github.com/tadeasraska/vault\nspec_version: 1\ncompile:\n  token_budget: 4000\n`,
+    `# Vault settings - https://github.com/tadeasraska/vault\nspec_version: 1\ncompile:\n  token_budget: 4000\n`,
   );
   writeFileSync(
     join(dir, 'me', 'profile.md'),
@@ -43,7 +43,7 @@ function defaultDeviceName(): string {
 
 function deviceTemplate(): string {
   return (
-    `# Per-device settings — NEVER synced between machines (spec §7).\n` +
+    `# Per-device settings - NEVER synced between machines (spec §7).\n` +
     `# Anchors map {name} placeholders in records to local paths.\n` +
     `device: ${defaultDeviceName()}\n` +
     `anchors: {}\n` +

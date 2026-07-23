@@ -24,7 +24,7 @@ function firstMeaningfulLine(body: string): string {
 export function condense(r: VaultRecord): string {
   const detail = firstMeaningfulLine(r.body);
   return detail
-    ? `- ${r.title} — ${detail} [${r.meta.id}]`
+    ? `- ${r.title}: ${detail} [${r.meta.id}]`
     : `- ${r.title} [${r.meta.id}]`;
 }
 
@@ -84,7 +84,7 @@ export function gatherContext(vaultDir: string, project: ProjectInfo): CompiledC
       if (!body) continue;
       const title = body.match(/^#\s+(.+)$/m)?.[1] ?? f.replace(/\.md$/, '');
       const line = firstMeaningfulLine(body.replace(/^#.+$/m, ''));
-      globalTaste.push(line ? `- ${title} — ${line}` : `- ${title}`);
+      globalTaste.push(line ? `- ${title}: ${line}` : `- ${title}`);
     }
   }
 

@@ -98,7 +98,7 @@ export function resolveProjectFromCwd(vaultDir: string, cwd: string): ProjectInf
     if (p) return p;
   }
 
-  // 2. device.yaml projects map (local, per-device path mapping — spec §7)
+  // 2. device.yaml projects map (local, per-device path mapping - spec §7)
   const device = readDeviceConfig(vaultDir);
   for (const [id, root] of Object.entries(device.projects)) {
     const rootAbs = resolve(root);

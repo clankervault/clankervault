@@ -87,7 +87,7 @@ export function supersedeRecord(
   const old = findRecord(vaultDir, projectId, oldId);
   if (!old) throw new Error(`Record ${oldId} not found in project ${projectId}`);
   const created = createRecord(vaultDir, projectId, input);
-  // rewrite frontmatter only — body stays untouched (append-only rule)
+  // rewrite frontmatter only - body stays untouched (append-only rule)
   const raw = matter(readFileSync(old.path, 'utf8'));
   raw.data.status = 'superseded';
   raw.data.superseded_by = created.meta.id;
