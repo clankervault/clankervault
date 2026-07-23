@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { defaultVaultDir, initVault, readConfig, requireVault } from './vault.js';
 import { createProject, getProject, listProjects, resolveProjectFromCwd } from './project.js';
 import { createRecord, listRecords, supersedeRecord } from './records.js';
@@ -53,10 +53,16 @@ project
   .option('--kind <kind>', 'code | creative', 'code')
   .option('--root <path>', 'directory on disk that identifies this project (repeatable)', (v: string, acc: string[]) => [...acc, v], [] as string[])
   .option('--git <url>', 'git remote URL that identifies this project (repeatable)', (v: string, acc: string[]) => [...acc, v], [] as string[])
-  .action((name: string, opts: { kind: 'code' | 'creative'; root: string[]; git: string[] }) => {
+  .action((name: string, opts: { kind: string; root: string[]; git: string[] }) => {
+    if (!['code', 'creative'].includes(opts.kind)) {
+      console.error(`Unknown kind "${opts.kind}". Use: code | creative`);
+      process.exit(1);
+    }
     const dir = requireVault(vaultDir());
-    const roots = [...opts.root.map((p) => ({ path: p })), ...opts.git.map((g) => ({ git: g }))];
-    const p = createProject(dir, name, { kind: opts.kind, roots });
+    // resolve --root to an absolute path now, at registration time - stored roots
+    // must never be re-interpreted against whatever cwd a later command runs from
+    const roots = [...opts.root.map((p) => ({ path: resolve(p) })), ...opts.git.map((g) => ({ git: g }))];
+    const p = createProject(dir, name, { kind: opts.kind as 'code' | 'creative', roots });
     console.log(`Project ${p.id} created at ${p.dir}`);
     if (!roots.length) console.log(`Tip: drop a .vault-id file containing "${p.id}" into the project folder on disk.`);
   });
@@ -161,7 +167,15 @@ program
   .action((opts: { project?: string; tool: string; out?: string; budget?: string }) => {
     const dir = requireVault(vaultDir());
     const p = needProject(opts.project);
-    const budget = opts.budget ? Number(opts.budget) : readConfig(dir).compile.token_budget;
+    let budget = readConfig(dir).compile.token_budget;
+    if (opts.budget !== undefined) {
+      const parsed = Number(opts.budget);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        console.error(`Invalid --budget "${opts.budget}": expected a positive number`);
+        process.exit(1);
+      }
+      budget = parsed;
+    }
     const ctx = applyBudget(gatherContext(dir, p), budget);
     const outDir = opts.out ?? process.cwd();
     for (const name of opts.tool.split(',').map((t) => t.trim()).filter(Boolean)) {

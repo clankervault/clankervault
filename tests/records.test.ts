@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { initVault } from '../src/vault.js';
 import { createRecord, listRecords, findRecord, supersedeRecord } from '../src/records.js';
@@ -52,7 +52,25 @@ describe('listRecords / findRecord', () => {
   });
 });
 
+describe('listRecords with foreign files', () => {
+  it('skips a hand-dropped non-record file instead of breaking', () => {
+    createRecord(dir, 'demo', { type: 'fact', title: 'Real record' });
+    writeFileSync(join(dir, 'projects', 'demo', 'records', 'notes.md'), '# Just some notes\n\nno frontmatter here\n');
+    const all = listRecords(dir, 'demo');
+    expect(all).toHaveLength(1);
+    expect(all[0].title).toBe('Real record');
+  });
+});
+
 describe('supersedeRecord', () => {
+  it('refuses to supersede an already-superseded record', () => {
+    const old = createRecord(dir, 'demo', { type: 'decision', title: 'Prisma' });
+    supersedeRecord(dir, 'demo', old.meta.id, { type: 'decision', title: 'Drizzle' });
+    expect(() =>
+      supersedeRecord(dir, 'demo', old.meta.id, { type: 'decision', title: 'Kysely' }),
+    ).toThrow(/already superseded/);
+  });
+
   it('creates new record and marks old one superseded (append-only)', () => {
     const old = createRecord(dir, 'demo', { type: 'decision', title: 'Prisma' });
     const { old: updated, created } = supersedeRecord(dir, 'demo', old.meta.id, {

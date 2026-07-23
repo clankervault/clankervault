@@ -41,6 +41,40 @@ describe('vault CLI end to end', () => {
     expect(r.out).toMatch(/vault state/);
   });
 
+  it('stores relative --root as an absolute path so later cwds cannot misattribute records', () => {
+    const vault = join(tmpDir(), 'v');
+    const projA = tmpDir();
+    const projB = tmpDir();
+    run(['init', vault]);
+    // register both projects with a RELATIVE root from inside their own dirs
+    expect(run(['--vault', vault, 'project', 'new', 'ProjA', '--root', '.'], projA).code).toBe(0);
+    expect(run(['--vault', vault, 'project', 'new', 'ProjB', '--root', '.'], projB).code).toBe(0);
+    // adding from projB without -p must land in ProjB, never ProjA
+    const add = run(['--vault', vault, 'add', 'fact', 'marker-in-B'], projB);
+    expect(add.code).toBe(0);
+    const list = run(['--vault', vault, 'list', '-p', 'projb']);
+    expect(list.out).toContain('marker-in-B');
+    expect(run(['--vault', vault, 'list', '-p', 'proja']).out).not.toContain('marker-in-B');
+  });
+
+  it('rejects an unknown --kind with guidance', () => {
+    const vault = join(tmpDir(), 'v');
+    run(['init', vault]);
+    const r = run(['--vault', vault, 'project', 'new', 'Demo', '--kind', 'banana']);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/code \| creative/);
+  });
+
+  it('rejects a non-numeric --budget with guidance', () => {
+    const vault = join(tmpDir(), 'v');
+    const work = tmpDir();
+    run(['init', vault]);
+    run(['--vault', vault, 'project', 'new', 'Demo', '--root', work]);
+    const r = run(['--vault', vault, 'compile', '--budget', 'abc'], work);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/Invalid --budget/);
+  });
+
   it('prints a clean one-line error, not a stack trace, on init over an existing vault', () => {
     const vault = join(tmpDir(), 'v');
     run(['init', vault]);

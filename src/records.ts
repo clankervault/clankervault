@@ -5,6 +5,7 @@ import type { Confidence, RecordMeta, RecordSource, RecordStatus, RecordType, Va
 import { shortId, slugify, today } from './util.js';
 
 const PREFIXES: Record<RecordType, string> = { fact: 'fct', recipe: 'rcp', decision: 'dec', taste: 'tst' };
+const RECORD_TYPES: RecordType[] = ['fact', 'recipe', 'decision', 'taste'];
 
 export interface NewRecordInput {
   type: RecordType;
@@ -71,10 +72,18 @@ export function parseRecordFile(filePath: string): VaultRecord {
 export function listRecords(vaultDir: string, projectId: string): VaultRecord[] {
   const dir = recordsDir(vaultDir, projectId);
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith('.md'))
-    .sort()
-    .map((f) => parseRecordFile(join(dir, f)));
+  const records: VaultRecord[] = [];
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.md')).sort()) {
+    const path = join(dir, f);
+    const r = parseRecordFile(path);
+    // a stray non-record file (hand-dropped notes etc.) must not break list/compile
+    if (typeof r.meta.id !== 'string' || !r.meta.id || !RECORD_TYPES.includes(r.meta.type)) {
+      console.error(`vault: skipping ${path}: not a vault record (missing id/type)`);
+      continue;
+    }
+    records.push(r);
+  }
+  return records;
 }
 
 export function findRecord(vaultDir: string, projectId: string, id: string): VaultRecord | null {
@@ -86,6 +95,9 @@ export function supersedeRecord(
 ): { old: VaultRecord; created: VaultRecord } {
   const old = findRecord(vaultDir, projectId, oldId);
   if (!old) throw new Error(`Record ${oldId} not found in project ${projectId}`);
+  if (old.meta.status === 'superseded') {
+    throw new Error(`Record ${oldId} is already superseded by ${old.meta.superseded_by}`);
+  }
   const created = createRecord(vaultDir, projectId, input);
   // rewrite frontmatter only - body stays untouched (append-only rule)
   const raw = matter(readFileSync(old.path, 'utf8'));
