@@ -61,8 +61,9 @@ npm run build
 npm link          # puts `vault` on your PATH
 ```
 
-`vault dev` (via `npm run dev`) runs the CLI straight from `src/cli.ts` with
-`tsx`, no build step needed, for local development.
+During development you can run the CLI straight from `src/cli.ts` with `tsx`,
+no build step needed: `npm run dev -- <args>` (the `--` passes the arguments
+through), e.g. `npm run dev -- init ~/vault`.
 
 ## Quickstart
 

@@ -174,4 +174,10 @@ program
     console.log('Remember: generated files belong in .gitignore.');
   });
 
-program.parse();
+// expected user errors (no vault yet, vault exists, ...) print one clean line, not a stack trace
+try {
+  program.parse();
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}

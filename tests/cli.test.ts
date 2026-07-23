@@ -40,4 +40,13 @@ describe('vault CLI end to end', () => {
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/vault state/);
   });
+
+  it('prints a clean one-line error, not a stack trace, on init over an existing vault', () => {
+    const vault = join(tmpDir(), 'v');
+    run(['init', vault]);
+    const r = run(['init', vault]);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/already exists/i);
+    expect(r.out).not.toMatch(/at .*cli\.ts/);
+  });
 });
