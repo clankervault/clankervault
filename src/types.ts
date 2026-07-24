@@ -25,11 +25,9 @@ export interface RecordMeta {
   expires?: string | null;
 }
 
-export interface DeviceSyncConfig {
-  backend: 'dir';
-  path: string;              // where the encrypted remote lives (mounted folder)
-  passphrase?: string;       // or env VAULT_PASSPHRASE
-}
+export type DeviceSyncConfig =
+  | { backend: 'dir'; path: string; passphrase?: string }
+  | { backend: 'http'; url: string; token: string; passphrase?: string };
 
 export interface DeviceConfig {
   device: string;                     // e.g. "macbook"
