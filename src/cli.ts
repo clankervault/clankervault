@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync, watch } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import type { AddressInfo } from 'node:net';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { defaultVaultDir, initVault, readConfig, readDeviceConfig, requireVault } from './vault.js';
 import { createProject, getProject, listProjects, resolveProjectFromCwd } from './project.js';
 import { confirmRecord, createRecord, listRecords, supersedeRecord } from './records.js';
 import { searchRecords } from './search.js';
-import { applyBudget, gatherContext } from './compile.js';
+import { applyBudget, compileAll, gatherContext } from './compile.js';
 import { adapters, getAdapter } from './adapters/index.js';
 import { logAccess } from './log.js';
 import { runMcp } from './mcp.js';
@@ -18,6 +20,7 @@ import { createVaultServer, resolveServerToken } from './server/http.js';
 import { ClaudeCliExtractor } from './mine/extract.js';
 import { defaultTranscriptRoot, discoverTranscripts, readOffsets, writeOffsets } from './mine/reader.js';
 import { mineOnce, settleRecords } from './mine/mine.js';
+import { runSetup } from './setup.js';
 import type { ProjectInfo, RecordType } from './types.js';
 
 /** wrong-passphrase decryption failures surface as a raw AES-GCM error; give a human reason instead */
@@ -64,6 +67,41 @@ program
     initVault(target);
     console.log(`Vault created at ${target}`);
     console.log('Next: `vault project new <name>` and edit me/profile.md');
+  });
+
+program
+  .command('setup')
+  .option('--yes', 'accept every default without prompting (CI/scripted use)')
+  .option('--dry-run', 'print what would happen, write nothing')
+  .description('detect installed AI tools, discover your projects and wire the vault into all of them')
+  .action(async (opts: { yes?: boolean; dryRun?: boolean }) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    // read via the async iterator, not repeated rl.question() calls: piped, non-tty
+    // stdin can deliver several buffered lines before the next prompt attaches its
+    // listener, and question()'s one-shot 'line' listener silently drops lines that
+    // arrive that way, hanging forever on the next prompt; the iterator queues correctly.
+    const lines = rl[Symbol.asyncIterator]();
+    try {
+      const ask = async (q: string): Promise<boolean> => {
+        process.stdout.write(q);
+        const { value, done } = await lines.next();
+        if (done) return true; // stdin closed before answering: same as an empty answer, default yes
+        const a = value.trim().toLowerCase();
+        return a === '' || a === 'y' || a === 'yes';
+      };
+      await runSetup({
+        home: homedir(),
+        vaultDir: vaultDir(),
+        yes: !!opts.yes,
+        dryRun: !!opts.dryRun,
+        ask,
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    } finally {
+      rl.close();
+    }
   });
 
 const project = program.command('project').description('manage projects');
@@ -189,14 +227,18 @@ program
 program
   .command('compile')
   .option('-p, --project <ref>')
-  .option('--tool <tools>', 'comma-separated adapters (claude,agents,cursor)', Object.keys(adapters).join(','))
+  .option('--all', 'compile every project that has an existing on-disk path root, into that root')
+  .option('--tool <tools>', 'comma-separated adapters (claude,agents,cursor,gemini,windsurf)', Object.keys(adapters).join(','))
   .option('--out <dir>', 'output directory (default: current directory)')
   .option('--budget <n>', 'token budget override')
   .option('--force', 'overwrite target files even when they are not vault-generated')
   .description('compile the vault into native tool files')
-  .action((opts: { project?: string; tool: string; out?: string; budget?: string; force?: boolean }) => {
+  .action((opts: { project?: string; all?: boolean; tool: string; out?: string; budget?: string; force?: boolean }) => {
     const dir = requireVault(vaultDir());
-    const p = needProject(opts.project);
+    if (opts.all && (opts.project || opts.out)) {
+      console.error('--all cannot be combined with --project or --out.');
+      process.exit(1);
+    }
     let budget = readConfig(dir).compile.token_budget;
     if (opts.budget !== undefined) {
       const parsed = Number(opts.budget);
@@ -206,9 +248,21 @@ program
       }
       budget = parsed;
     }
+    const tools = opts.tool.split(',').map((t) => t.trim()).filter(Boolean);
+
+    if (opts.all) {
+      const result = compileAll(dir, tools, { budget, force: opts.force });
+      for (const w of result.wrote) console.log(`wrote ${w}`);
+      for (const s of result.skipped) console.log(`skipped ${s.target}: ${s.reason}`);
+      console.log(`compiled ${result.compiledProjects} projects, skipped ${result.skipped.length} files`);
+      logAccess(dir, 'compile', { all: true, projects: result.compiledProjects });
+      return;
+    }
+
+    const p = needProject(opts.project);
     const ctx = applyBudget(gatherContext(dir, p), budget);
     const outDir = opts.out ?? process.cwd();
-    for (const name of opts.tool.split(',').map((t) => t.trim()).filter(Boolean)) {
+    for (const name of tools) {
       const adapter = getAdapter(name);
       const target = join(outDir, adapter.filename);
       // never clobber a hand-written file: only vault-generated targets are ours to replace

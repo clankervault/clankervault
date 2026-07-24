@@ -124,4 +124,24 @@ describe('vault CLI end to end', () => {
     expect(r.out).toMatch(/already exists/i);
     expect(r.out).not.toMatch(/at .*cli\.ts/);
   });
+
+  it('compile --all compiles every project with an existing path root, skipping projects without one', () => {
+    const vault = join(tmpDir(), 'v');
+    const rootA = tmpDir();
+    const rootB = tmpDir();
+    run(['init', vault]);
+    run(['--vault', vault, 'project', 'new', 'ProjA', '--root', rootA]);
+    run(['--vault', vault, 'project', 'new', 'ProjB', '--root', rootB]);
+    // no --root: this project has no path root at all, so --all must skip it silently
+    run(['--vault', vault, 'project', 'new', 'ProjC']);
+
+    const r = run(['--vault', vault, 'compile', '--all', '--tool', 'claude']);
+    expect(r.code).toBe(0);
+    expect(existsSync(join(rootA, 'CLAUDE.md'))).toBe(true);
+    expect(existsSync(join(rootB, 'CLAUDE.md'))).toBe(true);
+    expect(r.out).toMatch(/compiled 2 projects, skipped 0 files/);
+
+    const conflict = run(['--vault', vault, 'compile', '--all', '--project', 'x']);
+    expect(conflict.code).toBe(1);
+  });
 });

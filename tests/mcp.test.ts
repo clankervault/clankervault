@@ -11,6 +11,7 @@ let buf = '';
 const pending = new Map<number, (msg: any) => void>();
 let nextId = 1;
 let rememberedId: string;
+let initResult: any;
 
 function cli(args: string[], cwd?: string) {
   return spawnSync('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), ...args], { encoding: 'utf8', cwd });
@@ -47,18 +48,22 @@ beforeAll(async () => {
       if (msg.id !== undefined && pending.has(msg.id)) { pending.get(msg.id)!(msg); pending.delete(msg.id); }
     }
   });
-  const init = await rpc('initialize', {
+  initResult = await rpc('initialize', {
     protocolVersion: '2024-11-05',
     capabilities: {},
     clientInfo: { name: 'test-client', version: '1.0.0' },
   });
-  expect(init.result.serverInfo.name).toBe('vault');
+  expect(initResult.result.serverInfo.name).toBe('vault');
   notify('notifications/initialized');
 }, 60000);
 
 afterAll(() => { proc?.kill(); });
 
 describe('vault mcp', () => {
+  it('advertises server-level instructions that teach the model to call get_context', () => {
+    expect(initResult.result.instructions).toContain('get_context');
+  });
+
   it('lists the four spec tools with call-me descriptions', async () => {
     const res = await rpc('tools/list');
     const names = res.result.tools.map((t: any) => t.name).sort();

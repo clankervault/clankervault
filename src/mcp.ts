@@ -51,8 +51,16 @@ function gatherMeOnly(vaultDir: string): string {
   return parts.join('\n\n');
 }
 
+/**
+ * Server-level instructions (MCP `initialize` result `instructions` field): the one
+ * piece of guidance every client sees regardless of which tool surfaces tool
+ * descriptions to the model. Teaches the get_context / remember loop up front.
+ */
+const SERVER_INSTRUCTIONS =
+  "This server is the user's portable memory vault. Call get_context once at the start of every conversation to learn who the user is and what they are working on. When the user states a durable fact, decision, recipe or preference, save it with remember. Records you save stay pending until the user confirms them.";
+
 export function buildServer(vaultDir: string): McpServer {
-  const server = new McpServer({ name: 'vault', version: '0.1.0' });
+  const server = new McpServer({ name: 'vault', version: '0.1.0' }, { instructions: SERVER_INSTRUCTIONS });
   const clientName = () => server.server.getClientVersion()?.name ?? 'unknown';
 
   const resolveRef = (ref?: string): ProjectInfo | null =>
