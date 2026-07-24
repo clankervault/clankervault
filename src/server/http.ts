@@ -14,6 +14,13 @@ export interface VaultServerOptions {
 const BODY_LIMIT = 32 * 1024 * 1024;
 const OBJECT_RE = /^\/v1\/sync\/objects\/([0-9a-f]{64})$/;
 
+class BodyTooLargeError extends Error {
+  constructor() {
+    super('body too large');
+    this.name = 'BodyTooLargeError';
+  }
+}
+
 export function resolveServerToken(dataDir: string, flag?: string): { token: string; generated: boolean } {
   if (flag) return { token: flag, generated: false };
   if (process.env.VAULT_SERVER_TOKEN) return { token: process.env.VAULT_SERVER_TOKEN, generated: false };
@@ -25,17 +32,37 @@ export function resolveServerToken(dataDir: string, flag?: string): { token: str
   return { token, generated: true };
 }
 
+/** true when the client's declared Content-Length alone already exceeds the limit,
+ *  so we can reject before reading a single byte of a body we know is oversized */
+function contentLengthTooLarge(req: IncomingMessage): boolean {
+  const header = req.headers['content-length'];
+  if (typeof header !== 'string') return false;
+  const n = Number(header);
+  return Number.isFinite(n) && n > BODY_LIMIT;
+}
+
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let failed = false;
     req.on('data', (c: Buffer) => {
+      if (failed) return;
       size += c.length;
-      if (size > BODY_LIMIT) { reject(new Error('body too large')); req.destroy(); return; }
+      if (size > BODY_LIMIT) {
+        failed = true;
+        // do not destroy the socket (that resets the connection and the client
+        // never sees our response) - stop accumulating and drain the rest instead,
+        // so the connection stays healthy enough to deliver the 413 body
+        req.removeAllListeners('data');
+        req.resume();
+        reject(new BodyTooLargeError());
+        return;
+      }
       chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    req.on('end', () => { if (!failed) resolve(Buffer.concat(chunks)); });
+    req.on('error', (err) => { if (!failed) reject(err); });
   });
 }
 
@@ -80,6 +107,8 @@ export function createVaultServer(opts: VaultServerOptions): Server {
         }
         if (req.method === 'PUT') {
           const ifMatch = req.headers['if-match'];
+          if (Array.isArray(ifMatch)) return sendJson(res, 400, { error: 'invalid if-match' });
+          if (contentLengthTooLarge(req)) return sendJson(res, 413, { error: 'body too large' });
           const body = await readBody(req);
           try {
             const version = await store.putManifest(body, typeof ifMatch === 'string' ? ifMatch : null);
@@ -89,6 +118,7 @@ export function createVaultServer(opts: VaultServerOptions): Server {
             throw err;
           }
         }
+        return sendJson(res, 405, { error: 'method not allowed' });
       }
 
       const object = path.match(OBJECT_RE);
@@ -98,13 +128,23 @@ export function createVaultServer(opts: VaultServerOptions): Server {
           try { return sendBytes(res, await store.getObject(key)); }
           catch { return sendJson(res, 404, { error: 'object not found' }); }
         }
-        if (req.method === 'PUT') { await store.putObject(key, await readBody(req)); res.writeHead(204); return res.end(); }
+        if (req.method === 'PUT') {
+          if (contentLengthTooLarge(req)) return sendJson(res, 413, { error: 'body too large' });
+          await store.putObject(key, await readBody(req));
+          res.writeHead(204);
+          return res.end();
+        }
         if (req.method === 'DELETE') { await store.deleteObject(key); res.writeHead(204); return res.end(); }
+        return sendJson(res, 405, { error: 'method not allowed' });
       }
 
       return sendJson(res, 404, { error: 'not found' });
     } catch (err) {
-      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      if (err instanceof BodyTooLargeError) return sendJson(res, 413, { error: 'body too large' });
+      // never put filesystem paths, stack traces, or other internal detail in the response body -
+      // the real error (which may embed on-disk paths from fs failures) is for the server log only
+      console.error('vault server error:', err);
+      sendJson(res, 500, { error: 'internal error' });
     }
   });
 }
