@@ -103,6 +103,45 @@ describe('anchors + availability', () => {
   });
 });
 
+describe('memory hygiene (spec section 8)', () => {
+  it('skips expired records but keeps unexpired ones', () => {
+    createRecord(dir, p.id, { type: 'fact', title: 'Old price', expires: '2020-01-01' });
+    createRecord(dir, p.id, { type: 'fact', title: 'Current price', expires: '2099-01-01' });
+    createRecord(dir, p.id, { type: 'fact', title: 'Timeless' });
+    const ctx = gatherContext(dir, p);
+    const all = ctx.records.fact.join('\n');
+    expect(all).not.toContain('Old price');
+    expect(all).toContain('Current price');
+    expect(all).toContain('Timeless');
+  });
+
+  it('never compiles unconfirmed records written via MCP, even at high confidence', () => {
+    createRecord(dir, p.id, {
+      type: 'fact', title: 'Injected via assistant',
+      status: 'unconfirmed', confidence: 'high',
+      source: { tool: 'mcp:claude-ai' },
+    });
+    createRecord(dir, p.id, {
+      type: 'fact', title: 'Mined locally',
+      status: 'unconfirmed', confidence: 'high',
+      source: { tool: 'claude-code' },
+    });
+    const ctx = gatherContext(dir, p);
+    const unconfirmed = ctx.unconfirmed.join('\n');
+    expect(unconfirmed).not.toContain('Injected via assistant');
+    expect(unconfirmed).toContain('Mined locally');
+  });
+
+  it('compiles MCP records once confirmed by a human', () => {
+    createRecord(dir, p.id, {
+      type: 'fact', title: 'Vetted assistant note',
+      status: 'confirmed', source: { tool: 'mcp:claude-ai' },
+    });
+    const ctx = gatherContext(dir, p);
+    expect(ctx.records.fact.join('\n')).toContain('Vetted assistant note');
+  });
+});
+
 describe('applyBudget', () => {
   it('cuts lowest-priority record lines first for code projects (facts before decisions)', () => {
     for (let i = 0; i < 30; i++) {

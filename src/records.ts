@@ -16,6 +16,7 @@ export interface NewRecordInput {
   status?: RecordStatus;
   confidence?: Confidence;
   source?: RecordSource | null;
+  expires?: string;
 }
 
 function recordsDir(vaultDir: string, projectId: string): string {
@@ -35,6 +36,7 @@ export function createRecord(vaultDir: string, projectId: string, input: NewReco
     confidence: input.confidence ?? 'high',
     source: input.source ?? null,             // null = written by hand
     tags: input.tags ?? [],
+    ...(input.expires ? { expires: input.expires } : {}),
   };
   const dir = recordsDir(vaultDir, projectId);
   // a freshly synced device may not have this project's records/ dir yet (an empty
@@ -65,6 +67,7 @@ export function parseRecordFile(filePath: string): VaultRecord {
       scope: data.scope ?? null, confidence: data.confidence ?? 'high',
       source: data.source ?? null, tags: data.tags ?? [],
       availability: data.availability ?? null,
+      expires: data.expires ? String(data.expires).slice(0, 10) : null,
     },
     title: title || filePath.split('/').pop()!.replace(/\.md$/, ''),
     body: bodyLines.join('\n').trim(),

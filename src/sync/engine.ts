@@ -7,7 +7,7 @@ import { deriveKey, decrypt, encrypt, objectKey } from './crypto.js';
 import { decodeManifest, emptyManifest, encodeManifest } from './manifest.js';
 import type { Manifest } from './manifest.js';
 
-const EXCLUDED_SEGMENTS = new Set(['device.yaml', '.sync', '.mine', '.DS_Store']);
+const EXCLUDED_SEGMENTS = new Set(['device.yaml', '.sync', '.mine', '.log', '.DS_Store']);
 
 export function isExcluded(relpath: string): boolean {
   return relpath.split('/').some((part) => EXCLUDED_SEGMENTS.has(part));

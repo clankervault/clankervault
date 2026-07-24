@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import matter from 'gray-matter';
 import { listRecords } from './records.js';
 import type { CompiledContext, DeviceConfig, ProjectInfo, ProjectKind, RecordType, VaultRecord } from './types.js';
-import { estimateTokens } from './util.js';
+import { estimateTokens, today } from './util.js';
 import { readDeviceConfig } from './vault.js';
 
 /** which record types survive budget cuts longest; state always survives */
@@ -77,7 +77,12 @@ export function gatherContext(vaultDir: string, project: ProjectInfo): CompiledC
 
   for (const r of listRecords(vaultDir, project.id)) {
     if (r.meta.status === 'superseded') continue;
+    // spec §8: expired records stay in the vault but are never served
+    if (r.meta.expires && r.meta.expires < today()) continue;
     if (r.meta.status === 'unconfirmed') {
+      // spec §8: records written via MCP never compile until a human confirms them
+      // (memory poisoning defense: compiled files are instructions for the model)
+      if (r.meta.source?.tool?.startsWith('mcp')) continue;
       if (r.meta.confidence === 'high') unconfirmed.push(line(r));
       continue; // medium/low unconfirmed stay in the vault, never compiled
     }

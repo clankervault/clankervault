@@ -21,6 +21,8 @@ export interface RecordMeta {
   tags: string[];
   /** optional, spec §7: device name → anchored path, or null = not present there */
   availability?: Record<string, string | null> | null;
+  /** optional, spec §8: volatile facts expire and stop compiling after this date */
+  expires?: string | null;
 }
 
 export interface DeviceSyncConfig {

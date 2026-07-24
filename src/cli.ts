@@ -8,6 +8,7 @@ import { createProject, getProject, listProjects, resolveProjectFromCwd } from '
 import { createRecord, listRecords, supersedeRecord } from './records.js';
 import { applyBudget, gatherContext } from './compile.js';
 import { adapters, getAdapter } from './adapters/index.js';
+import { logAccess } from './log.js';
 import { DirBackend } from './sync/backend.js';
 import { isExcluded, syncOnce } from './sync/engine.js';
 import type { ProjectInfo, RecordType } from './types.js';
@@ -93,8 +94,9 @@ program
   .option('-b, --body <text>')
   .option('-s, --scope <scope>')
   .option('-t, --tags <tags>', 'comma-separated')
+  .option('-e, --expires <date>', 'YYYY-MM-DD after which this record stops compiling (volatile facts)')
   .description('add a record (written by hand → confirmed)')
-  .action((type: string, title: string, opts: { project?: string; body?: string; scope?: string; tags?: string }) => {
+  .action((type: string, title: string, opts: { project?: string; body?: string; scope?: string; tags?: string; expires?: string }) => {
     if (!['fact', 'recipe', 'decision', 'taste'].includes(type)) {
       console.error(`Unknown type "${type}". Use: fact | recipe | decision | taste (work in progress goes to \`vault state\`).`);
       process.exit(1);
@@ -104,6 +106,7 @@ program
       type: type as RecordType, title,
       body: opts.body, scope: opts.scope,
       tags: opts.tags ? opts.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+      expires: opts.expires,
     });
     console.log(`${r.meta.id}  ${r.path}`);
   });
@@ -159,6 +162,7 @@ program
   .description('search titles and bodies across all projects')
   .action((query: string) => {
     const dir = requireVault(vaultDir());
+    logAccess(dir, 'search', { query });
     const q = query.toLowerCase();
     for (const p of listProjects(dir)) {
       for (const r of listRecords(dir, p.id)) {
@@ -197,6 +201,7 @@ program
       console.log(`wrote ${target}`);
     }
     if (ctx.droppedCount) console.log(`(${ctx.droppedCount} records over budget omitted, raise compile.token_budget in vault.yaml if needed)`);
+    logAccess(dir, 'compile', { project: p.id, tools: opts.tool });
     console.log('Remember: generated files belong in .gitignore.');
   });
 
