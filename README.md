@@ -161,13 +161,78 @@ Shipped today: `claude` (`CLAUDE.md`), `agents` (`AGENTS.md`) and `cursor`
 (`.cursorrules`). Adding a new tool means writing one more adapter file and
 registering it, nothing else in the CLI or compiler needs to change.
 
+## Sync
+
+`vault sync` reconciles a vault edited from more than one device, without git
+and without a server. There is no cloud service to sign up for: the remote
+is just a folder, so anything that already keeps a folder in sync between
+your machines works, iCloud Drive, Dropbox, a NAS mount, a USB drive. `vault`
+only ever writes encrypted objects into that folder; the storage side (v1
+ships `dir`, a plain directory backend) is a small pluggable interface, so a
+future backend could talk to an actual server without changing anything else.
+
+Everything that leaves this machine is end-to-end encrypted first: file
+contents, file paths and the manifest that lists them are all encrypted with
+a key derived from your passphrase, so whatever holds the remote folder
+(iCloud, a NAS, a USB stick you lose) never sees plaintext content or even
+readable filenames. Only a random salt sits on the remote unencrypted, since
+key derivation needs it.
+
+Setup on two devices, once each, pointing at the same remote path with the
+same passphrase:
+
+```bash
+vault sync setup --path /path/to/shared/folder --passphrase <same-on-every-device>
+```
+
+Omit `--passphrase` and set `VAULT_PASSPHRASE` in your shell environment
+instead if you would rather not have it sitting in `device.yaml`. Either
+way, the passphrase must be identical on every device: it is what lets two
+machines decrypt each other's objects and is never itself transmitted.
+
+Then, on any device:
+
+```bash
+vault sync              # one-shot: pull and push whatever changed, print a summary
+vault sync --watch      # keep running: initial sync, then sync on every local change
+                         # (1.5s debounce) plus a periodic sync every --interval seconds (default 30)
+```
+
+`--watch` runs until you stop it (Ctrl+C) and is meant for a machine you
+leave open, so continuous small edits go out as continuous small diffs
+instead of one large sync later.
+
+**Conflict semantics.** The four append-only record kinds merge for free:
+each record is its own file with a generated name, so two devices adding
+records under `records/` never collide. A true conflict can only happen on
+a file you hand-edit directly and that keeps the same path across devices,
+`state.md`, `me/profile.md`, a project's `project.md`, or `vault.yaml`,
+when both devices change it since the last sync. `vault sync` resolves that
+with last-write-wins by modification time, and the losing version is never
+silently discarded: it is written next to the file it lost to as a
+timestamped `<name>.conflict-<device>-<stamp>.md` copy, which also syncs to
+every other device, so you can always go read what the other side had and
+recover it by hand if last-write-wins picked wrong.
+
+**Never synced**, by design, spec §7: `device.yaml` (per-device settings:
+device name, anchors, project root map, sync config itself), `.sync/`
+(this device's local sync state), `.mine/`, and `.DS_Store`. These describe
+this machine, not the vault's content, so they stay local on every device.
+
+**Known limitations**, not solved in this phase: last-write-wins depends on
+roughly sane, roughly synchronized clocks across your devices, a device with
+a badly wrong clock can win conflicts it should lose. The directory backend's
+compare-and-swap on the manifest is best-effort, safe against the concurrent-
+write races this codebase creates and tests, but not a guarantee against every
+possible failure mode of arbitrary third-party sync software (iCloud, Dropbox)
+racing underneath it. The passphrase, when saved with `--passphrase` instead
+of `VAULT_PASSPHRASE`, sits in `device.yaml` in plaintext on that device.
+
 ## Roadmap
 
-Phase 1 is the format plus this CLI: everything above is implemented and
-tested. Explicitly out of scope for phase 1, and coming later:
+Phase 1 (the format plus this CLI) and phase 2 (sync) are implemented and
+tested. Still out of scope, and coming later:
 
-- **Sync**: reconciling a vault edited from more than one device, including
-  conflicting `state.md` writes.
 - **MCP server**: structured, on-demand querying of the vault instead of a
   full recompile per tool.
 - **Mining**: proposing `unconfirmed` records straight from AI conversation
