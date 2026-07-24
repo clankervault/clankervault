@@ -15,25 +15,57 @@ import { initVault, isVault, readConfig } from './vault.js';
 export const KNOWN_TOOLS = ['claude-code', 'codex', 'cursor', 'gemini', 'claude-desktop', 'windsurf'] as const;
 
 // -------------------------------------------------------------------------
-// vaultBin: the command string other tools' configs should invoke.
+// vaultBin: the resolved CLI entry other tools' configs should invoke.
 // -------------------------------------------------------------------------
+
+/** command + argv prefix needed to invoke the vault CLI; never a pre-joined shell string */
+export interface VaultBin {
+  command: string;
+  args: string[];
+}
 
 /**
  * Resolve the CLI entry other tools' configs should shell out to. Prefers an
- * installed `vault` on PATH (npm link / global install); falls back to a
- * `node <dist/cli.js>` form when it is not (a dev checkout not yet linked).
- * The fallback is a two-token string: fine inside a shell command (the
- * settings.json hook), imperfect as a single `command` field in a JSON MCP
- * config (Claude Desktop / Cursor) - acceptable there because on a real
- * install `which vault` resolves, and in tests the fallback path is not
- * expected to actually be launched.
+ * installed `vault` on PATH (npm link / global install): `{ command: <abs path>, args: [] }`.
+ * Falls back, when it is not on PATH (a dev checkout not yet linked), to running the
+ * built CLI straight through node: `{ command: process.execPath, args: [<abs dist/cli.js>] }`.
+ * Always structured, never a pre-joined string: a path containing a space must stay
+ * one argv element, not get split by a naive `.split(' ')` downstream.
  */
-export function vaultBin(): string {
+export function vaultBin(): VaultBin {
   const found = spawnSync('which', ['vault'], { encoding: 'utf8' });
-  if (found.status === 0 && found.stdout.trim()) return found.stdout.trim();
+  if (found.status === 0 && found.stdout.trim()) {
+    return { command: resolve(found.stdout.trim()), args: [] };
+  }
   const here = fileURLToPath(import.meta.url);
   const distCli = resolve(dirname(here), '..', 'dist', 'cli.js');
-  return `node ${distCli}`;
+  return { command: process.execPath, args: [distCli] };
+}
+
+/** human-readable rendering for informational print lines (never executed, quoting not required) */
+function binDisplay(bin: VaultBin): string {
+  return [bin.command, ...bin.args].join(' ');
+}
+
+/** double-quote a single shell token, escaping the characters that matter inside double quotes */
+function shellQuote(s: string): string {
+  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`')}"`;
+}
+
+/**
+ * The exact shell command written into the Claude Code SessionStart hook. Every
+ * token is quoted, including the command itself, so a path containing a space
+ * (a node fallback path, or a `vault` install under a spaced directory) still
+ * runs as one program with one set of args rather than splitting apart.
+ */
+export function hookCommand(bin: VaultBin): string {
+  const parts = [bin.command, ...bin.args].map(shellQuote).join(' ');
+  return `${parts} compile --tool claude >/dev/null 2>&1 || true`;
+}
+
+/** the exact `{ command, args }` object written into an MCP client's JSON config */
+export function mcpServerConfig(bin: VaultBin): { command: string; args: string[] } {
+  return { command: bin.command, args: [...bin.args, 'mcp'] };
 }
 
 // -------------------------------------------------------------------------
@@ -241,12 +273,30 @@ export interface RunSetupOptions {
   ask: (q: string) => Promise<boolean>;
 }
 
-function readJsonFile(file: string): Record<string, unknown> {
+/** thrown by readJsonFileStrict when a config file exists but does not parse as JSON */
+export class InvalidConfigError extends Error {
+  file: string;
+  constructor(file: string) {
+    super(`${file} is not valid JSON`);
+    this.file = file;
+  }
+}
+
+/**
+ * Read a JSON config. A missing file is treated as "start from empty" ({}); a file
+ * that EXISTS but fails to parse throws InvalidConfigError instead of silently
+ * discarding whatever the user (or another tool) put there. Callers must not write
+ * anything, and must not take a backup, when this throws: there is nothing safe to
+ * merge into, and a backup of unparseable content would just be a second unparseable
+ * file.
+ */
+function readJsonFileStrict(file: string): Record<string, unknown> {
   if (!existsSync(file)) return {};
+  const raw = readFileSync(file, 'utf8');
   try {
-    return JSON.parse(readFileSync(file, 'utf8'));
+    return JSON.parse(raw);
   } catch {
-    return {}; // corrupted config: do not crash setup over it, start from empty and let the user notice the backup
+    throw new InvalidConfigError(file);
   }
 }
 
@@ -263,27 +313,51 @@ function writeJsonFile(file: string, data: unknown): void {
   writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
 }
 
-/** idempotently add the SessionStart hook that keeps CLAUDE.md fresh every session */
-function addClaudeCodeHook(home: string, bin: string): string {
+interface HookEntry { type?: string; command?: string; timeout?: number }
+interface HookGroup { hooks?: HookEntry[] }
+
+/** a hook command we (or an earlier run of us, under a different resolved bin) wrote */
+function isOurHook(command: string | undefined): boolean {
+  return !!command && command.includes('vault') && command.includes('compile');
+}
+
+/**
+ * Idempotently add (or, on a stale entry, REPLACE in place) the SessionStart hook that
+ * keeps CLAUDE.md fresh every session. Matching by a stable "vault" + "compile" marker,
+ * not by exact string equality, because the resolved bin path can legitimately change
+ * between runs (a fresh npm link, a moved checkout); an exact-match dedupe would just
+ * keep appending a new, now-correct entry next to a stale, now-wrong one forever.
+ */
+function addClaudeCodeHook(home: string, bin: VaultBin): string {
   const file = join(home, '.claude', 'settings.json');
-  backupOnce(file);
-  const settings = readJsonFile(file) as { hooks?: Record<string, { hooks?: { command?: string }[] }[]> };
+  const settings = readJsonFileStrict(file) as { hooks?: Record<string, HookGroup[]> };
+  backupOnce(file); // only reached once the existing file is confirmed to parse
   settings.hooks = settings.hooks ?? {};
   const list = settings.hooks.SessionStart ?? [];
-  const command = `${bin} compile --tool claude >/dev/null 2>&1 || true`;
-  const already = list.some((group) => (group.hooks ?? []).some((h) => h.command === command));
-  if (!already) list.push({ hooks: [{ type: 'command', command, timeout: 15 }] } as never);
+  const command = hookCommand(bin);
+  let replaced = false;
+  for (const group of list) {
+    for (const h of group.hooks ?? []) {
+      if (isOurHook(h.command)) {
+        h.type = 'command';
+        h.command = command;
+        h.timeout = 15;
+        replaced = true;
+      }
+    }
+  }
+  if (!replaced) list.push({ hooks: [{ type: 'command', command, timeout: 15 }] });
   settings.hooks.SessionStart = list;
   writeJsonFile(file, settings);
   return file;
 }
 
 /** idempotently merge mcpServers.vault into a client's MCP config, preserving everything else */
-function mergeMcpServer(file: string, bin: string): void {
-  backupOnce(file);
-  const config = readJsonFile(file) as { mcpServers?: Record<string, unknown> };
+function mergeMcpServer(file: string, bin: VaultBin): void {
+  const config = readJsonFileStrict(file) as { mcpServers?: Record<string, unknown> };
+  backupOnce(file); // only reached once the existing file is confirmed to parse
   config.mcpServers = config.mcpServers ?? {};
-  config.mcpServers.vault = { command: bin, args: ['mcp'] };
+  config.mcpServers.vault = mcpServerConfig(bin);
   writeJsonFile(file, config);
 }
 
@@ -292,11 +366,11 @@ function escapeXml(s: string): string {
 }
 
 /** the free, local refresh daemon: `vault compile --all` on an hourly launchd schedule */
-function writeRefreshPlist(home: string, vaultDirPath: string, bin: string): string {
+function writeRefreshPlist(home: string, vaultDirPath: string, bin: VaultBin): string {
   const dir = join(home, 'Library', 'LaunchAgents');
   mkdirSync(dir, { recursive: true });
   const plistPath = join(dir, 'dev.vault.refresh.plist');
-  const programArgs = [...bin.split(' '), 'compile', '--all']
+  const programArgs = [bin.command, ...bin.args, 'compile', '--all']
     .map((a) => `        <string>${escapeXml(a)}</string>`)
     .join('\n');
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -325,6 +399,13 @@ ${programArgs}
   return plistPath;
 }
 
+/** codex config.toml is never edited; this is the ready-to-paste snippet vault prints instead */
+function codexSnippetText(bin: VaultBin): string {
+  const cfg = mcpServerConfig(bin);
+  const argsList = cfg.args.map((a) => `"${a}"`).join(', ');
+  return `[mcp_servers.vault]\ncommand = "${cfg.command}"\nargs = [${argsList}]`;
+}
+
 export async function runSetup(opts: RunSetupOptions): Promise<void> {
   const { home, vaultDir, yes, dryRun, ask } = opts;
   const plan = buildPlan(home, vaultDir);
@@ -341,6 +422,15 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
     return ask(`${label}? [Y/n] `);
   };
 
+  /** an edited config that turned out not to parse: warn, skip that one action, touch nothing */
+  const warnOrRethrow = (err: unknown): void => {
+    if (err instanceof InvalidConfigError) {
+      console.log(`warning: ${err.file} is not valid JSON; fix it and re-run vault setup; the file was NOT touched`);
+      return;
+    }
+    throw err;
+  };
+
   console.log(`Detected tools: ${plan.tools.length ? plan.tools.join(', ') : '(none)'}`);
 
   // 1. init vault
@@ -349,6 +439,11 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
       initVault(vaultDir);
       console.log(`Vault created at ${vaultDir}`);
       done.push(`created vault at ${vaultDir}`);
+    } else if (!dryRun) {
+      // every remaining step either registers into the vault or compiles out of it:
+      // without one there is nothing left to safely do
+      console.log('nothing else to do without a vault');
+      return;
     }
   } else {
     console.log(`Vault exists at ${vaultDir}`);
@@ -369,14 +464,17 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
   }
 
   const claudeMcpLine = `claude mcp add vault -- vault mcp`;
-  const codexSnippet = `[mcp_servers.vault]\ncommand = "${bin}"\nargs = ["mcp"]`;
 
   // 3. Claude Code: SessionStart hook (compiled files), print the MCP one-liner (never run it)
   if (plan.tools.includes('claude-code')) {
     if (await confirm('wire a SessionStart hook into Claude Code settings.json (keeps CLAUDE.md fresh)')) {
-      const file = addClaudeCodeHook(home, bin);
-      console.log(`Wired Claude Code hook in ${file}`);
-      done.push('wired Claude Code SessionStart hook');
+      try {
+        const file = addClaudeCodeHook(home, bin);
+        console.log(`Wired Claude Code hook in ${file}`);
+        done.push('wired Claude Code SessionStart hook');
+      } catch (err) {
+        warnOrRethrow(err);
+      }
     }
   }
 
@@ -384,9 +482,13 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
   if (plan.tools.includes('claude-desktop')) {
     const file = join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
     if (await confirm(`register the vault MCP server in Claude Desktop config (${file})`)) {
-      mergeMcpServer(file, bin);
-      console.log(`Wired Claude Desktop MCP config in ${file}`);
-      done.push('wired Claude Desktop MCP config');
+      try {
+        mergeMcpServer(file, bin);
+        console.log(`Wired Claude Desktop MCP config in ${file}`);
+        done.push('wired Claude Desktop MCP config');
+      } catch (err) {
+        warnOrRethrow(err);
+      }
     }
   }
 
@@ -394,16 +496,20 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
   if (plan.tools.includes('cursor')) {
     const file = join(home, '.cursor', 'mcp.json');
     if (await confirm(`register the vault MCP server in Cursor (${file})`)) {
-      mergeMcpServer(file, bin);
-      console.log(`Wired Cursor MCP config in ${file}`);
-      done.push('wired Cursor MCP config');
+      try {
+        mergeMcpServer(file, bin);
+        console.log(`Wired Cursor MCP config in ${file}`);
+        done.push('wired Cursor MCP config');
+      } catch (err) {
+        warnOrRethrow(err);
+      }
     }
   }
 
   // 6. Codex: print the config.toml snippet, never edit TOML
   if (plan.tools.includes('codex')) {
     console.log('Codex detected. Add this to ~/.codex/config.toml by hand (vault never edits TOML):');
-    console.log(codexSnippet);
+    console.log(codexSnippetText(bin));
   }
 
   // 7. mine --from-now semantics inline: fast-forward offsets, print the mining daemon line
@@ -424,7 +530,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
   }
   console.log(
     `Mining daemon (optional, costs API calls via the claude CLI): create ~/Library/LaunchAgents/dev.vault.mine.plist ` +
-      `running \`${bin} mine\` on a schedule, then: launchctl load ~/Library/LaunchAgents/dev.vault.mine.plist`,
+      `running \`${binDisplay(bin)} mine\` on a schedule, then: launchctl load ~/Library/LaunchAgents/dev.vault.mine.plist`,
   );
 
   // 8. darwin only: offer the free local refresh daemon
@@ -439,7 +545,7 @@ export async function runSetup(opts: RunSetupOptions): Promise<void> {
       done.push('installed the refresh daemon');
     }
   } else {
-    console.log(`Non-macOS: no launchd here. Add a cron entry instead, e.g.: 0 * * * * ${bin} compile --all`);
+    console.log(`Non-macOS: no launchd here. Add a cron entry instead, e.g.: 0 * * * * ${binDisplay(bin)} compile --all`);
   }
 
   // 9. final compile --all with the plan's adapters

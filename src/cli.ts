@@ -252,8 +252,8 @@ program
 
     if (opts.all) {
       const result = compileAll(dir, tools, { budget, force: opts.force });
-      for (const s of result.skipped) console.log(`skipped ${s.target}: ${s.reason}`);
       for (const w of result.wrote) console.log(`wrote ${w}`);
+      for (const s of result.skipped) console.log(`skipped ${s.target}: ${s.reason}`);
       console.log(`compiled ${result.compiledProjects} projects, skipped ${result.skipped.length} files`);
       logAccess(dir, 'compile', { all: true, projects: result.compiledProjects });
       return;

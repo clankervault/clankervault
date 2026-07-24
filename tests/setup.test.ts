@@ -3,11 +3,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpDir } from './helpers.js';
-import { discoverProjects } from '../src/setup.js';
+import { discoverProjects, hookCommand, mcpServerConfig, type VaultBin } from '../src/setup.js';
 
-function run(args: string[], home: string, vault: string, extraEnv: Record<string, string> = {}) {
+function run(args: string[], home: string, vault: string, extraEnv: Record<string, string> = {}, input?: string) {
   const r = spawnSync('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), ...args], {
     encoding: 'utf8',
+    input,
+    timeout: 20000,
     env: {
       ...process.env,
       HOME: home,
@@ -141,6 +143,105 @@ describe('vault setup wizard', () => {
     expect(existsSync(join(home, '.claude', 'settings.json'))).toBe(false);
     expect(existsSync(join(home, '.cursor', 'mcp.json'))).toBe(false);
     expect(existsSync(join(work, 'CLAUDE.md'))).toBe(false);
+  });
+
+  it('never touches a settings.json that fails to parse, warns instead, and still completes the other steps', () => {
+    const home = tmpDir();
+    const vault = join(tmpDir(), 'v');
+    const work = join(tmpDir(), 'work');
+    mkdirSync(work, { recursive: true });
+    fabricateClaudeTranscript(home, '-x-work', work);
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    const settingsFile = join(home, '.claude', 'settings.json');
+    const invalidJson = '{"model":"x",}'; // trailing comma: not valid JSON
+    writeFileSync(settingsFile, invalidJson);
+
+    const r = run(['setup', '--yes'], home, vault);
+    expect(r.code).toBe(0);
+
+    // the broken file is byte-identical, no backup was made for it
+    expect(readFileSync(settingsFile, 'utf8')).toBe(invalidJson);
+    expect(existsSync(`${settingsFile}.bak-vault`)).toBe(false);
+    expect(r.out).toMatch(/warning:.*settings\.json is not valid JSON.*re-run vault setup.*NOT touched/);
+
+    // other, independent action groups still went through
+    expect(existsSync(join(vault, 'vault.yaml'))).toBe(true);
+    const list = run(['project', 'list'], home, vault);
+    expect(list.out).toMatch(/work/);
+  });
+
+  it('replaces a stale hook entry in place instead of appending a duplicate, keyed by a stable vault+compile marker', () => {
+    const home = tmpDir();
+    const vault = join(tmpDir(), 'v');
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    const staleCommand = '/old/moved/path/vault compile --tool claude >/dev/null 2>&1 || true';
+    writeFileSync(
+      join(home, '.claude', 'settings.json'),
+      JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: staleCommand, timeout: 15 }] }] } }),
+    );
+
+    const r = run(['setup', '--yes'], home, vault);
+    expect(r.code).toBe(0);
+
+    const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+    const commands: string[] = settings.hooks.SessionStart.flatMap((g: { hooks: { command: string }[] }) =>
+      g.hooks.map((h) => h.command),
+    );
+    const vaultHooks = commands.filter((c) => c.includes('vault') && c.includes('compile'));
+    expect(vaultHooks.length).toBe(1);
+    expect(vaultHooks[0]).not.toBe(staleCommand);
+  });
+
+  it('exits 0 without hanging when the first prompt is declined, with no vault ever created', () => {
+    const home = tmpDir();
+    const vault = join(tmpDir(), 'v');
+    const r = run(['setup'], home, vault, {}, 'n\n');
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/nothing else to do without a vault/);
+    expect(existsSync(join(vault, 'vault.yaml'))).toBe(false);
+  }, 20000);
+
+  it('registers a discovered project through the default-yes interactive flow (empty answers)', () => {
+    const home = tmpDir();
+    const vault = join(tmpDir(), 'v');
+    const work = join(tmpDir(), 'work');
+    mkdirSync(work, { recursive: true });
+    fabricateClaudeTranscript(home, '-x-work', work);
+
+    // one empty line per possible prompt is more than enough; EOF-before-answer
+    // defaults to yes too, so extra blank lines are harmless padding
+    const r = run(['setup'], home, vault, {}, '\n\n\n\n\n\n\n\n\n\n');
+    expect(r.code).toBe(0);
+
+    expect(existsSync(join(vault, 'vault.yaml'))).toBe(true);
+    const list = run(['project', 'list'], home, vault);
+    expect(list.out).toMatch(/work/);
+  }, 20000);
+});
+
+describe('vaultBin formatting surfaces', () => {
+  it('hookCommand quotes every token, including a command containing a space', () => {
+    const bin: VaultBin = { command: '/Users/mac test/vault', args: [] };
+    const cmd = hookCommand(bin);
+    expect(cmd).toBe('"/Users/mac test/vault" compile --tool claude >/dev/null 2>&1 || true');
+  });
+
+  it('hookCommand quotes the fallback node + script form (command and args both quoted)', () => {
+    const bin: VaultBin = { command: '/usr/local/bin/node', args: ['/Users/mac/my project/dist/cli.js'] };
+    const cmd = hookCommand(bin);
+    expect(cmd).toBe('"/usr/local/bin/node" "/Users/mac/my project/dist/cli.js" compile --tool claude >/dev/null 2>&1 || true');
+  });
+
+  it('mcpServerConfig appends "mcp" to the base args without mutating the input', () => {
+    const bin: VaultBin = { command: '/usr/local/bin/node', args: ['/Users/mac/my project/dist/cli.js'] };
+    const cfg = mcpServerConfig(bin);
+    expect(cfg).toEqual({ command: '/usr/local/bin/node', args: ['/Users/mac/my project/dist/cli.js', 'mcp'] });
+    expect(bin.args).toEqual(['/Users/mac/my project/dist/cli.js']); // not mutated
+  });
+
+  it('mcpServerConfig on a plain resolved binary is just { command, args: ["mcp"] }', () => {
+    const bin: VaultBin = { command: '/Users/mac/.npm-global/bin/vault', args: [] };
+    expect(mcpServerConfig(bin)).toEqual({ command: '/Users/mac/.npm-global/bin/vault', args: ['mcp'] });
   });
 });
 
