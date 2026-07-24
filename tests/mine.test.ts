@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appendFileSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { initVault } from '../src/vault.js';
 import { createProject } from '../src/project.js';
@@ -137,6 +137,55 @@ describe('mineOnce', () => {
     const r = await mineOnce(vault, ex, { root, minChars: 10, dryRun: true });
     expect(r.created).toHaveLength(1);          // reported
     expect(readOffsets(vault)).toEqual({});     // but nothing persisted
+    expect(existsSync(join(vault, '.log', 'access.jsonl'))).toBe(false); // and not even logged
+  });
+
+  it('does not advance the offset for a chunk that has not reached minChars yet', async () => {
+    const vault = tmpDir(); initVault(vault);
+    const work = tmpDir();
+    createProject(vault, 'Demo', { roots: [{ path: work }] });
+    const root = tmpDir();
+    const f = writeTranscript(root, 'proj', work, ['short line']);
+
+    const ex = fakeExtractor([{ type: 'fact', title: 'Should not appear', body: '', confidence: 'high' }]);
+    const r = await mineOnce(vault, ex, { root, minChars: 10000 });
+    expect(r.created).toHaveLength(0);
+    expect(ex.calls).toBe(0);
+    expect(readOffsets(vault)[f]).toBeUndefined();
+  });
+
+  it('does not advance the offset on an extraction error, and retries the same chunk next run', async () => {
+    const vault = tmpDir(); initVault(vault);
+    const work = tmpDir();
+    createProject(vault, 'Demo', { roots: [{ path: work }] });
+    const root = tmpDir();
+    const text = 'about exporting shorts with ffmpeg '.repeat(30);
+    const f = writeTranscript(root, 'proj', work, [text]);
+
+    const throwing: Extractor = { name: 'throwing', async extract() { throw new Error('boom'); } };
+    await expect(mineOnce(vault, throwing, { root, minChars: 10 })).resolves.toBeDefined();
+    expect(readOffsets(vault)[f]).toBeUndefined();
+
+    let seenText = '';
+    const recording: Extractor = { name: 'recording', async extract(input) { seenText = input.text; return []; } };
+    await mineOnce(vault, recording, { root, minChars: 10 });
+    expect(seenText).toContain('about exporting shorts with ffmpeg');
+  });
+
+  it('advances the offset past a meta-only chunk without ever calling the extractor', async () => {
+    const vault = tmpDir(); initVault(vault);
+    const work = tmpDir();
+    createProject(vault, 'Demo', { roots: [{ path: work }] });
+    const root = tmpDir();
+    const dir = join(root, 'proj');
+    mkdirSync(dir, { recursive: true });
+    const f = join(dir, 'session.jsonl');
+    writeFileSync(f, JSON.stringify({ type: 'summary', cwd: work, stuff: true }) + '\n');
+
+    const ex = fakeExtractor([]);
+    await mineOnce(vault, ex, { root, minChars: 10 });
+    expect(ex.calls).toBe(0);
+    expect(readOffsets(vault)[f]).toBeGreaterThan(0);
   });
 });
 

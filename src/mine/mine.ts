@@ -73,8 +73,10 @@ export async function mineOnce(vaultDir: string, extractor: Extractor, opts: Min
     }
   }
 
-  if (!opts.dryRun) writeOffsets(vaultDir, offsets);
-  logAccess(vaultDir, 'mine', { files: result.files, created: result.created.length, extractor: extractor.name });
+  if (!opts.dryRun) {
+    writeOffsets(vaultDir, offsets);
+    logAccess(vaultDir, 'mine', { files: result.files, created: result.created.length, extractor: extractor.name });
+  }
   return result;
 }
 

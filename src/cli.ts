@@ -237,6 +237,15 @@ program
   .action(async (opts: { root?: string; dryRun?: boolean; watch?: boolean; interval: string }) => {
     try {
       const dir = requireVault(vaultDir());
+      let intervalMs = 0;
+      if (opts.watch) {
+        const interval = Number(opts.interval);
+        if (!Number.isFinite(interval) || interval <= 0) {
+          console.error(`Invalid --interval "${opts.interval}"`);
+          process.exit(1);
+        }
+        intervalMs = interval * 1000;
+      }
       const extractor = new ClaudeCliExtractor();
       const runOnce = async () => {
         const r = await mineOnce(dir, extractor, { root: opts.root, dryRun: opts.dryRun });
@@ -246,7 +255,7 @@ program
       };
       await runOnce();
       if (opts.watch) {
-        setInterval(() => { runOnce().catch((e) => console.error(e instanceof Error ? e.message : String(e))); }, Number(opts.interval) * 1000);
+        setInterval(() => { runOnce().catch((e) => console.error(e instanceof Error ? e.message : String(e))); }, intervalMs);
         console.log(`mining every ${opts.interval}s, Ctrl+C to stop`);
       }
     } catch (err) {
