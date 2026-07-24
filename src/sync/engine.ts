@@ -148,6 +148,16 @@ export async function syncOnce(
       }
       // both changed
       if (localHash === remoteHash) continue;                    // converged independently
+      if (lastHash === undefined) {
+        // first contact: this device never synced this path; the shared remote is the established truth and a fresh init template must not overwrite it
+        const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 17);
+        const copy = conflictPath(rel, deviceName, stamp);
+        writeLocal(copy, readLocal(rel));
+        await upload(copy);
+        await download(rel);
+        result.conflicts.push(rel);
+        continue;
+      }
       if (localHash === undefined) { await download(rel); continue; }   // edit beats delete
       if (remoteHash === undefined) { await upload(rel); continue; }
       // true conflict: last write wins, loser preserved as a timestamped conflict copy;

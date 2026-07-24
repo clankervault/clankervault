@@ -264,6 +264,25 @@ describe('syncOnce: two simulated devices', () => {
   });
 });
 
+describe('first contact', () => {
+  it('a fresh device must not overwrite established remote content with its init template', async () => {
+    const remote = tmpDir();
+    const A = newDevice('macbook');
+    const backend = () => new DirBackend(remote);
+    writeFileSync(join(A, 'me', 'profile.md'), '# Profile\n\nJsem Tadeas, strihac a dev.\n');
+    await syncOnce(A, backend(), 'pass', 'macbook');
+
+    const B = newDevice('mini');            // fresh init: template profile.md, NEWER mtime than A's
+    await syncOnce(B, backend(), 'pass', 'mini');
+    expect(rf(join(B, 'me', 'profile.md'), 'utf8')).toContain('Jsem Tadeas');       // remote won
+    const copies = readdirSync(join(B, 'me')).filter((f) => f.startsWith('profile.conflict-mini'));
+    expect(copies).toHaveLength(1);                                                  // template preserved
+
+    await syncOnce(A, backend(), 'pass', 'macbook');
+    expect(rf(join(A, 'me', 'profile.md'), 'utf8')).toContain('Jsem Tadeas');       // A untouched
+  });
+});
+
 describe('conflictPath', () => {
   it('inserts the device and a timestamp before the extension', () => {
     expect(conflictPath('projects/x/state.md', 'mini', '20260724142530123'))

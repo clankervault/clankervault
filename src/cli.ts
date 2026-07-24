@@ -12,7 +12,7 @@ import { applyBudget, gatherContext } from './compile.js';
 import { adapters, getAdapter } from './adapters/index.js';
 import { logAccess } from './log.js';
 import { runMcp } from './mcp.js';
-import { DirBackend } from './sync/backend.js';
+import { DirBackend, HttpBackend } from './sync/backend.js';
 import { isExcluded, syncOnce } from './sync/engine.js';
 import { createVaultServer, resolveServerToken } from './server/http.js';
 import { ClaudeCliExtractor } from './mine/extract.js';
@@ -283,24 +283,39 @@ program
 const sync = program.command('sync').description('sync the vault with the configured remote (E2E encrypted)');
 sync
   .command('setup')
-  .requiredOption('--path <dir>', 'remote directory (mounted cloud folder, NAS, USB)')
+  .option('--path <dir>', 'remote directory (mounted cloud folder, NAS, USB)')
+  .option('--url <u>', 'vault server URL (self-hosted sync server, see `vault serve`)')
+  .option('--token <t>', 'bearer token for --url (or set VAULT_SERVER_TOKEN)')
   .option('--passphrase <p>', 'encryption passphrase (or set VAULT_PASSPHRASE)')
-  .action((opts: { path: string; passphrase?: string }) => {
+  .action((opts: { path?: string; url?: string; token?: string; passphrase?: string }) => {
+    if (!opts.path && !opts.url) {
+      console.error('Sync setup needs a remote: --path <dir> or --url <server> --token <t>');
+      process.exit(1);
+    }
+    if (opts.path && opts.url) {
+      console.error('Use either --path or --url, not both.');
+      process.exit(1);
+    }
+    if (opts.url && !opts.token) {
+      console.error('--url requires --token.');
+      process.exit(1);
+    }
     const dir = requireVault(vaultDir());
     const file = join(dir, 'device.yaml');
     const raw = existsSync(file) ? parseYaml(readFileSync(file, 'utf8')) ?? {} : {};
-    // merge, do not clobber: rerunning setup to change --path (or move to a new remote)
+    // merge, do not clobber: rerunning setup to change the remote (or move to a new one)
     // must not silently drop a passphrase saved on a previous run
     const existing = raw.sync && typeof raw.sync === 'object' ? raw.sync : {};
-    raw.sync = {
-      backend: 'dir',
-      path: resolve(opts.path),
-      ...(opts.passphrase ? { passphrase: opts.passphrase } : existing.passphrase ? { passphrase: existing.passphrase } : {}),
-    };
+    const passphrase = opts.passphrase
+      ? { passphrase: opts.passphrase }
+      : existing.passphrase ? { passphrase: existing.passphrase } : {};
+    raw.sync = opts.url
+      ? { backend: 'http', url: opts.url, token: opts.token!, ...passphrase }
+      : { backend: 'dir', path: resolve(opts.path!), ...passphrase };
     // device.yaml can hold the sync passphrase: owner-only, and tighten pre-existing files too
     writeFileSync(file, stringifyYaml(raw), { mode: 0o600 });
     chmodSync(file, 0o600);
-    console.log(`Sync configured: ${resolve(opts.path)}`);
+    console.log(`Sync configured: ${opts.url ?? resolve(opts.path!)}`);
     console.log('Use the SAME passphrase on every device. It never leaves your machines.');
     if (!raw.sync.passphrase) console.log('No passphrase saved: set VAULT_PASSPHRASE before running `vault sync`.');
   });
@@ -315,7 +330,7 @@ sync
       const dir = requireVault(vaultDir());
       const device = readDeviceConfig(dir);
       if (!device.sync) {
-        console.error('Sync is not configured on this device. Run: vault sync setup --path <remoteDir>');
+        console.error('Sync is not configured on this device. Run: vault sync setup --path <remoteDir> (or --url <server> --token <t>)');
         process.exit(1);
       }
       const passphrase = process.env.VAULT_PASSPHRASE ?? device.sync.passphrase;
@@ -323,7 +338,9 @@ sync
         console.error('No passphrase. Set VAULT_PASSPHRASE or run `vault sync setup` with --passphrase.');
         process.exit(1);
       }
-      const backend = new DirBackend(device.sync.path);
+      const backend = device.sync.backend === 'http'
+        ? new HttpBackend(device.sync.url, device.sync.token)
+        : new DirBackend(device.sync.path);
       const runOnce = async () => {
         const r = await syncOnce(dir, backend, passphrase, device.device);
         const total = r.uploaded.length + r.downloaded.length + r.deletedLocal.length + r.deletedRemote.length;
