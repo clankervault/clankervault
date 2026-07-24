@@ -24,7 +24,11 @@ const OFFSETS_FILE = 'offsets.json';
 export function readOffsets(vaultDir: string): Record<string, number> {
   const f = join(vaultDir, '.mine', OFFSETS_FILE);
   if (!existsSync(f)) return {};
-  return JSON.parse(readFileSync(f, 'utf8'));
+  try {
+    return JSON.parse(readFileSync(f, 'utf8'));
+  } catch {
+    return {};                                          // corrupted offsets file: start fresh, never crash
+  }
 }
 
 export function writeOffsets(vaultDir: string, o: Record<string, number>): void {
@@ -54,15 +58,25 @@ function textOf(content: unknown): string {
 /** read new complete lines from fromByte; a trailing line without a newline stays unread */
 export function readChunk(file: string, fromByte: number): TranscriptChunk | null {
   const size = statSync(file).size;
-  if (size <= fromByte) return null;
+  // if the file is now shorter than our recorded offset, it was rewritten or truncated
+  // underneath us (not just appended to); the old offset is meaningless, so restart from 0
+  const start = size < fromByte ? 0 : fromByte;
+  if (size <= start) return null;
   const fd = openSync(file, 'r');
-  const buf = Buffer.alloc(size - fromByte);
-  readSync(fd, buf, 0, buf.length, fromByte);
+  const want = size - start;
+  const buf = Buffer.alloc(want);
+  let readTotal = 0;
+  while (readTotal < want) {
+    const n = readSync(fd, buf, readTotal, want - readTotal, start + readTotal);
+    if (n === 0) break;                                 // EOF hit early; shrink to what we actually got
+    readTotal += n;
+  }
   closeSync(fd);
-  const lastNl = buf.lastIndexOf(0x0a);
+  const data = buf.subarray(0, readTotal);
+  const lastNl = data.lastIndexOf(0x0a);
   if (lastNl < 0) return null;                       // no complete new line yet
-  const toByte = fromByte + lastNl + 1;
-  const lines = buf.subarray(0, lastNl + 1).toString('utf8').split('\n');
+  const toByte = start + lastNl + 1;
+  const lines = data.subarray(0, lastNl + 1).toString('utf8').split('\n');
 
   const parts: string[] = [];
   let cwd: string | null = null;
@@ -75,6 +89,6 @@ export function readChunk(file: string, fromByte: number): TranscriptChunk | nul
     const t = textOf(e.message?.content).trim();
     if (t) parts.push(`${e.type.toUpperCase()}: ${t}`);
   }
-  if (!parts.length && cwd === null) return { file, fromByte, toByte, cwd: null, text: '' };
-  return { file, fromByte, toByte, cwd, text: parts.join('\n') };
+  if (!parts.length && cwd === null) return { file, fromByte: start, toByte, cwd: null, text: '' };
+  return { file, fromByte: start, toByte, cwd, text: parts.join('\n') };
 }

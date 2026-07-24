@@ -29,6 +29,14 @@ describe('offsets', () => {
     writeOffsets(dir, { '/x/a.jsonl': 42 });
     expect(readOffsets(dir)).toEqual({ '/x/a.jsonl': 42 });
   });
+
+  it('returns empty instead of throwing when the offsets file is corrupted', () => {
+    const dir = tmpDir();
+    initVault(dir);
+    mkdirSync(join(dir, '.mine'), { recursive: true });
+    writeFileSync(join(dir, '.mine', 'offsets.json'), 'not json{{{');
+    expect(readOffsets(dir)).toEqual({});
+  });
 });
 
 describe('readChunk', () => {
@@ -71,5 +79,16 @@ describe('readChunk', () => {
     writeFileSync(f, 'not json at all\n' + entry('user', 'valid'));
     const c = readChunk(f, 0)!;
     expect(c.text).toContain('valid');
+  });
+
+  it('resets to the start when the file shrinks (rewritten or truncated underneath us)', () => {
+    const f = join(tmpDir(), 's.jsonl');
+    writeFileSync(f, entry('user', 'first'));
+    appendFileSync(f, entry('user', 'second'));
+    const c1 = readChunk(f, 0)!;
+    writeFileSync(f, entry('user', 'fresh'));   // overwritten with a single, shorter line
+    const c2 = readChunk(f, c1.toByte)!;
+    expect(c2.fromByte).toBe(0);
+    expect(c2.text).toContain('USER: fresh');
   });
 });
