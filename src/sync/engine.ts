@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import type { Backend } from './backend.js';
+import { VersionConflictError } from './backend.js';
+import { deriveKey, decrypt, encrypt, objectKey } from './crypto.js';
+import { decodeManifest, emptyManifest, encodeManifest } from './manifest.js';
+import type { Manifest } from './manifest.js';
 
 const EXCLUDED_SEGMENTS = new Set(['device.yaml', '.sync', '.mine', '.DS_Store']);
 
@@ -47,4 +52,128 @@ export function readSyncState(vaultDir: string): SyncState {
 export function writeSyncState(vaultDir: string, s: SyncState): void {
   mkdirSync(join(vaultDir, '.sync'), { recursive: true });
   writeFileSync(statePath(vaultDir), JSON.stringify(s, null, 2));
+}
+
+export interface SyncResult {
+  uploaded: string[];
+  downloaded: string[];
+  deletedLocal: string[];
+  deletedRemote: string[];
+  conflicts: string[];
+}
+
+/** projects/x/state.md + mini -> projects/x/state.conflict-mini.md */
+export function conflictPath(relpath: string, device: string): string {
+  const dot = relpath.lastIndexOf('.');
+  const slash = relpath.lastIndexOf('/');
+  if (dot > slash) return `${relpath.slice(0, dot)}.conflict-${device}${relpath.slice(dot)}`;
+  return `${relpath}.conflict-${device}`;
+}
+
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Three-way merge per vault-relative path: local hash L, remote manifest hash R
+ * (undefined if tombstoned/absent), last-synced hash S. See task-4-brief.md for the
+ * full merge rules table. Retries the whole cycle on a concurrent manifest write
+ * (CAS version conflict), re-pulling a fresh manifest each attempt.
+ */
+export async function syncOnce(
+  vaultDir: string, backend: Backend, passphrase: string, deviceName: string,
+): Promise<SyncResult> {
+  await backend.ensure();
+  const key = deriveKey(passphrase, await backend.getSalt());
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const remote = await backend.getManifest();
+    const manifest: Manifest = remote ? decodeManifest(remote.data, key) : emptyManifest();
+    const baseVersion = remote?.version ?? null;
+    const local = scanLocal(vaultDir);
+    const last = readSyncState(vaultDir);
+    const result: SyncResult = { uploaded: [], downloaded: [], deletedLocal: [], deletedRemote: [], conflicts: [] };
+    let dirty = false;
+
+    const readLocal = (rel: string) => readFileSync(join(vaultDir, rel));
+    const writeLocal = (rel: string, data: Buffer) => {
+      mkdirSync(dirname(join(vaultDir, rel)), { recursive: true });
+      writeFileSync(join(vaultDir, rel), data);
+    };
+    const upload = async (rel: string) => {
+      const content = readLocal(rel);
+      await backend.putObject(objectKey(key, rel), encrypt(key, content));
+      manifest.files[rel] = {
+        hash: sha256(content), size: content.length,
+        mtimeMs: statSync(join(vaultDir, rel)).mtimeMs, modifiedBy: deviceName,
+      };
+      dirty = true;
+      result.uploaded.push(rel);
+    };
+    const download = async (rel: string) => {
+      writeLocal(rel, decrypt(key, await backend.getObject(objectKey(key, rel))));
+      result.downloaded.push(rel);
+    };
+    const tombstone = async (rel: string) => {
+      const entry = manifest.files[rel];
+      manifest.files[rel] = { ...entry, deleted: true, mtimeMs: Date.now(), modifiedBy: deviceName };
+      await backend.deleteObject(objectKey(key, rel));
+      dirty = true;
+      result.deletedRemote.push(rel);
+    };
+
+    const paths = new Set([...Object.keys(local), ...Object.keys(manifest.files), ...Object.keys(last.files)]);
+    for (const rel of paths) {
+      const entry = manifest.files[rel];
+      const localHash: string | undefined = local[rel]?.hash;
+      const remoteHash: string | undefined = entry && !entry.deleted ? entry.hash : undefined;
+      const lastHash: string | undefined = last.files[rel];
+      const localChanged = localHash !== lastHash;
+      const remoteChanged = remoteHash !== lastHash;
+
+      if (!localChanged && !remoteChanged) continue;
+      if (localChanged && !remoteChanged) {
+        if (localHash === undefined) { if (entry && !entry.deleted) await tombstone(rel); }
+        else await upload(rel);
+        continue;
+      }
+      if (!localChanged && remoteChanged) {
+        if (remoteHash === undefined) {
+          if (localHash !== undefined) { rmSync(join(vaultDir, rel)); result.deletedLocal.push(rel); }
+        } else await download(rel);
+        continue;
+      }
+      // both changed
+      if (localHash === remoteHash) continue;                    // converged independently
+      if (localHash === undefined) { await download(rel); continue; }   // edit beats delete
+      if (remoteHash === undefined) { await upload(rel); continue; }
+      // true conflict: last write wins, loser preserved
+      const localWins = local[rel].mtimeMs >= entry.mtimeMs;
+      if (localWins) {
+        const remoteContent = decrypt(key, await backend.getObject(objectKey(key, rel)));
+        const copy = conflictPath(rel, entry.modifiedBy);
+        writeLocal(copy, remoteContent);
+        await upload(copy);
+        await upload(rel);
+      } else {
+        const copy = conflictPath(rel, deviceName);
+        writeLocal(copy, readLocal(rel));
+        await upload(copy);
+        await download(rel);
+      }
+      result.conflicts.push(rel);
+    }
+
+    if (dirty) {
+      manifest.seq++;
+      try {
+        await backend.putManifest(encodeManifest(manifest, key), baseVersion);
+      } catch (err) {
+        if (err instanceof VersionConflictError) continue;   // fresh pull, re-merge
+        throw err;
+      }
+    }
+    const finalScan = scanLocal(vaultDir);
+    writeSyncState(vaultDir, { files: Object.fromEntries(Object.entries(finalScan).map(([p, f]) => [p, f.hash])) });
+    return result;
+  }
+  throw new Error('sync: remote kept changing, giving up after 3 attempts (run again)');
 }
