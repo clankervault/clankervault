@@ -4,6 +4,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { DirBackend, VersionConflictError } from '../sync/backend.js';
+import { Replica } from './replica.js';
+import { buildServer } from '../mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 export interface VaultServerOptions {
   dataDir: string;
@@ -79,6 +82,7 @@ function sendBytes(res: ServerResponse, data: Buffer): void {
 
 export function createVaultServer(opts: VaultServerOptions): Server {
   const store = new DirBackend(join(opts.dataDir, 'store'));
+  const replica = opts.passphrase ? new Replica(opts.dataDir, opts.passphrase) : null;
   const expected = Buffer.from(opts.token);
 
   const authed = (req: IncomingMessage): boolean => {
@@ -136,6 +140,18 @@ export function createVaultServer(opts: VaultServerOptions): Server {
         }
         if (req.method === 'DELETE') { await store.deleteObject(key); res.writeHead(204); return res.end(); }
         return sendJson(res, 405, { error: 'method not allowed' });
+      }
+
+      if (path === '/v1/mcp' && req.method === 'POST') {
+        if (!opts.passphrase) {
+          return sendJson(res, 503, { error: 'Remote MCP needs VAULT_PASSPHRASE on the server. Without it this server is a pure encrypted sync store.' });
+        }
+        await replica!.fresh();
+        const body = JSON.parse((await readBody(req)).toString('utf8'));
+        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+        const mcpServer = buildServer(replica!.dir);
+        await mcpServer.connect(transport);
+        return transport.handleRequest(req, res, body);
       }
 
       return sendJson(res, 404, { error: 'not found' });

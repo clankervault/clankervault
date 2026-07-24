@@ -389,10 +389,14 @@ program
       if (!Number.isFinite(port) || port < 0) { console.error(`Invalid --port "${opts.port}"`); process.exit(1); }
       const { token, generated } = resolveServerToken(resolve(opts.data), opts.token);
       if (generated) console.log(`Generated token (share with your devices, shown once): ${token}`);
-      const server = createVaultServer({ dataDir: resolve(opts.data), token, passphrase: process.env.VAULT_PASSPHRASE });
+      const passphrase = process.env.VAULT_PASSPHRASE;
+      const server = createVaultServer({ dataDir: resolve(opts.data), token, passphrase });
       server.listen(port, () => {
         const real = (server.address() as AddressInfo).port;
         console.log(`vault server listening on :${real} (sync API ready)`);
+        console.log(passphrase
+          ? 'MCP endpoint: enabled at /v1/mcp'
+          : 'MCP endpoint: disabled (set VAULT_PASSPHRASE to enable)');
       });
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));

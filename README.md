@@ -276,6 +276,74 @@ argument: pass `lenses: false` when you want project facts and state without
 the personal layer (`profile` and `taste`), for a context you plan to hand to
 someone else or paste somewhere less private.
 
+## Self-hosting
+
+`vault serve` runs a small server that gives you two things from one process:
+an encrypted sync remote (the `--url` alternative to a shared folder, see
+Sync above) and a remote MCP endpoint at `/v1/mcp` for chat assistants that
+can reach the network but cannot launch a local `vault mcp` stdio process,
+a hosted assistant, a phone, a teammate's machine.
+
+```bash
+vault serve --data /path/to/server-data --port 8484
+```
+
+**Token model.** Every request needs `Authorization: Bearer <token>`. The
+token comes from `--token`, or `VAULT_SERVER_TOKEN` in the environment, or,
+if neither is set, a random one generated on first run and saved to
+`<data>/token` (owner-only, mode 0600), printed once to stdout so you can
+copy it to your devices. There is no per-user account system: one token
+per server, shared across every device you point at it.
+
+Point a device at it the same way you would a shared folder:
+
+```bash
+vault sync setup --url https://your-server:8484 --token <token> --passphrase <same-on-every-device>
+vault sync
+```
+
+**The E2E tradeoff.** By default, with no `VAULT_PASSPHRASE` in the server's
+own environment, `vault serve` is a pure ciphertext store: exactly like
+syncing over a folder, it never sees plaintext, and `/v1/mcp` answers `503`
+rather than pretending to work. Setting `VAULT_PASSPHRASE` on the server
+enables `/v1/mcp`: the server decrypts a private working copy for itself
+(the replica, kept under `<data>/replica`, refreshed from the ciphertext
+store roughly every 15 seconds) so it has something to answer MCP tool
+calls with. That is a real, deliberate tradeoff, not a hidden one: it moves
+trust from "nothing but your own devices ever sees plaintext" to "your
+server, which you operate, sees plaintext too", and the startup log always
+states which mode is active:
+
+```
+MCP endpoint: enabled at /v1/mcp
+MCP endpoint: disabled (set VAULT_PASSPHRASE to enable)
+```
+
+**Docker.** The image builds from source (`npm ci`, `tsc`, then
+`npm prune --omit=dev`) and its entrypoint is `vault serve --data /data
+--port 8484`:
+
+```bash
+docker build -t vault-server .
+docker run -d \
+  -p 8484:8484 \
+  -v vault-data:/data \
+  -e VAULT_SERVER_TOKEN=<pick-a-long-random-token> \
+  -e VAULT_PASSPHRASE=<optional, enables remote MCP> \
+  vault-server
+```
+
+`/data` holds the ciphertext store, the token file if you did not supply
+one, and, only when `VAULT_PASSPHRASE` is set, the decrypted replica: back
+it up like a vault, and treat the container's filesystem like you would any
+server that can hold decrypted user data when that variable is set.
+
+This is the self-hostable half of what a hosted vault service would need,
+one server, one token, your own machine or VPS. Running this for other
+people, multi-tenant accounts, billing, TLS termination, one-click deploy,
+is not built here; it is the natural paid tier on top, not a requirement to
+use vault yourself.
+
 ## Mining
 
 `vault mine` finds durable, reusable knowledge already sitting in your AI
@@ -327,15 +395,18 @@ one.
 
 ## Roadmap
 
-Phase 1 (the format plus this CLI), phase 2 (sync), phase 3 (the MCP server)
-and phase 4 (mining) are implemented and tested. Still out of scope, and
-coming later:
+Phase 1 (the format plus this CLI), phase 2 (sync), phase 3 (the MCP server),
+phase 4 (mining) and phase 5 (the self-hostable server: HTTP sync remote plus
+remote MCP endpoint, see Self-hosting above) are implemented and tested.
+Still out of scope, and coming later:
 
 - **More mining readers**: Codex session logs, Cursor, best-effort, meant to
   slot in behind the same reader/extractor interfaces without changing
   `vault mine` or the CLI.
-- **Hosted MCP endpoint**: a remote, always-on server instead of the stdio
-  process each client launches locally today.
+- **Hosted, multi-tenant service**: someone else's `vault serve` running
+  your vault for you, with accounts, billing and TLS handled for you. The
+  server code for that already exists and is self-hostable today; only the
+  multi-tenant operation of it is not built, and is the natural paid tier.
 
 The on-disk format and this CLI's commands are meant to stay stable through
 all of that: a vault you start today should keep working unmodified once
