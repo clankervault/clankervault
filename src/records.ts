@@ -117,3 +117,15 @@ export function supersedeRecord(
   created.meta.supersedes = old.meta.id;
   return { old: parseRecordFile(old.path), created };
 }
+
+export function confirmRecord(vaultDir: string, projectId: string, id: string): VaultRecord {
+  const rec = findRecord(vaultDir, projectId, id);
+  if (!rec) throw new Error(`Record ${id} not found in project ${projectId}`);
+  if (rec.meta.status === 'superseded') throw new Error(`Record ${id} is superseded and cannot be confirmed`);
+  if (rec.meta.status !== 'confirmed') {
+    const raw = matter(readFileSync(rec.path, 'utf8'));
+    raw.data.status = 'confirmed';
+    writeFileSync(rec.path, matter.stringify(raw.content, raw.data));
+  }
+  return parseRecordFile(rec.path);
+}
