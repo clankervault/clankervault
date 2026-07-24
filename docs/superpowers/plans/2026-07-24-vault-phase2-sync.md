@@ -612,7 +612,9 @@ describe('syncOnce: two simulated devices', () => {
     for (const n of names) {
       expect(rf(join(remote, 'objects', n)).toString('latin1')).not.toContain('Vercel');
     }
-    expect(rf(join(remote, 'manifest.bin')).toString('latin1')).not.toContain('secret-project');
+    const manifestRaw = rf(join(remote, 'manifest.json')).toString('latin1');
+    expect(manifestRaw).not.toContain('secret-project');
+    expect(Buffer.from(JSON.parse(manifestRaw).payload, 'base64').toString('latin1')).not.toContain('secret-project');
   });
 
   it('device.yaml never reaches the remote', async () => {
@@ -925,6 +927,10 @@ git add -A && git commit -m "Add vault sync command with setup, one-shot and wat
 ```
 
 ---
+
+## Post-Review Amendments
+
+- Task 2 amended after review: manifest is ONE atomic file `manifest.json` (`{"version", "payload": base64}`) written via tmp+rename, so version and data cannot diverge on crash; object keys validated against `/^[0-9a-f]{64}$/`; `VersionConflictError.name` set. Interface signatures unchanged.
 
 ## Self-Review Notes
 
