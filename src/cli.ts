@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { existsSync, readFileSync, writeFileSync, watch } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync, watch } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { defaultVaultDir, initVault, readConfig, readDeviceConfig, requireVault } from './vault.js';
@@ -295,7 +295,9 @@ sync
       path: resolve(opts.path),
       ...(opts.passphrase ? { passphrase: opts.passphrase } : existing.passphrase ? { passphrase: existing.passphrase } : {}),
     };
-    writeFileSync(file, stringifyYaml(raw));
+    // device.yaml can hold the sync passphrase: owner-only, and tighten pre-existing files too
+    writeFileSync(file, stringifyYaml(raw), { mode: 0o600 });
+    chmodSync(file, 0o600);
     console.log(`Sync configured: ${resolve(opts.path)}`);
     console.log('Use the SAME passphrase on every device. It never leaves your machines.');
     if (!raw.sync.passphrase) console.log('No passphrase saved: set VAULT_PASSPHRASE before running `vault sync`.');

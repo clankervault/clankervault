@@ -34,7 +34,8 @@ export function initVault(dir: string): void {
     join(dir, 'me', 'profile.md'),
     `# Profile\n\nWho I am, what I do, language and tone preferences.\nThis goes into every compiled output, for every tool.\n`,
   );
-  writeFileSync(join(dir, 'device.yaml'), deviceTemplate());
+  // per-device file that may later hold the sync passphrase: owner-only from the start
+  writeFileSync(join(dir, 'device.yaml'), deviceTemplate(), { mode: 0o600 });
 }
 
 function defaultDeviceName(): string {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { chmodSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpDir } from './helpers.js';
 
@@ -19,8 +19,12 @@ describe('vault sync CLI', () => {
 
     run(['init', vaultA]);
     run(['init', vaultB]);
+    // widen perms first to prove setup tightens a pre-existing file, not just fresh writes
+    chmodSync(join(vaultA, 'device.yaml'), 0o644);
     expect(run(['--vault', vaultA, 'sync', 'setup', '--path', remote, '--passphrase', 'p']).code).toBe(0);
     expect(readFileSync(join(vaultA, 'device.yaml'), 'utf8')).toContain('backend: dir');
+    // passphrase on disk: owner-only
+    expect(statSync(join(vaultA, 'device.yaml')).mode & 0o777).toBe(0o600);
     expect(run(['--vault', vaultB, 'sync', 'setup', '--path', remote, '--passphrase', 'p']).code).toBe(0);
 
     run(['--vault', vaultA, 'project', 'new', 'Demo']);
