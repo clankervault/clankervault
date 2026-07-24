@@ -2,11 +2,12 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { DirBackend, VersionConflictError } from '../sync/backend.js';
 import { Replica } from './replica.js';
 import { buildServer } from '../mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 export interface VaultServerOptions {
   dataDir: string;
@@ -16,6 +17,13 @@ export interface VaultServerOptions {
 
 const BODY_LIMIT = 32 * 1024 * 1024;
 const OBJECT_RE = /^\/v1\/sync\/objects\/([0-9a-f]{64})$/;
+const MCP_SESSION_IDLE_MS = 30 * 60 * 1000;
+
+interface McpSession {
+  server: ReturnType<typeof buildServer>;
+  transport: StreamableHTTPServerTransport;
+  lastUsed: number;
+}
 
 class BodyTooLargeError extends Error {
   constructor() {
@@ -80,9 +88,102 @@ function sendBytes(res: ServerResponse, data: Buffer): void {
   res.end(data);
 }
 
+/** wrong-passphrase decryption failures surface as a raw AES-GCM error (same signal
+ *  the client side already recognizes in cli.ts's friendlySyncError) */
+function isDecryptFailure(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes('Unsupported state') || msg.includes('unable to authenticate');
+}
+
+/** drop sessions nobody has used in 30 minutes; swept lazily on each request
+ *  instead of on a timer, so an idle server does no background work */
+function sweepIdleMcpSessions(sessions: Map<string, McpSession>): void {
+  const now = Date.now();
+  for (const [id, session] of sessions) {
+    if (now - session.lastUsed <= MCP_SESSION_IDLE_MS) continue;
+    sessions.delete(id);
+    session.transport.close().catch(() => {});
+    session.server.close().catch(() => {});
+  }
+}
+
+/**
+ * Handle one /v1/mcp request: session routing (create on `initialize`, else look up
+ * by the `mcp-session-id` header), then a fresh replica read before and an
+ * unconditional push back to the ciphertext store after, so a write this request
+ * made reaches the remote immediately rather than waiting out the freshness window.
+ * Callers must run this serialized per server (see mcpQueue in createVaultServer):
+ * this function alone does not guard against two of its own invocations racing.
+ */
+async function handleMcpRequest(
+  replica: Replica,
+  sessions: Map<string, McpSession>,
+  req: IncomingMessage,
+  res: ServerResponse,
+  body: unknown,
+): Promise<void> {
+  sweepIdleMcpSessions(sessions);
+
+  try {
+    await replica.fresh();
+  } catch (err) {
+    if (isDecryptFailure(err)) {
+      return sendJson(res, 500, { error: 'server cannot decrypt the store (check VAULT_PASSPHRASE on the server)' });
+    }
+    throw err;
+  }
+
+  const sessionIdHeader = req.headers['mcp-session-id'];
+  const sessionId = typeof sessionIdHeader === 'string' ? sessionIdHeader : undefined;
+
+  let transport: StreamableHTTPServerTransport;
+  if (sessionId && sessions.has(sessionId)) {
+    const session = sessions.get(sessionId)!;
+    session.lastUsed = Date.now();
+    transport = session.transport;
+  } else if (!sessionId && isInitializeRequest(body)) {
+    const server = buildServer(replica.dir);
+    transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: (id) => { sessions.set(id, { server, transport, lastUsed: Date.now() }); },
+    });
+    transport.onclose = () => {
+      const sid = transport.sessionId;
+      if (sid) sessions.delete(sid);
+    };
+    await server.connect(transport);
+  } else {
+    return sendJson(res, 400, {
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+      id: null,
+    });
+  }
+
+  await transport.handleRequest(req, res, body);
+
+  // the response is already sent by this point, so a push failure here (decrypt or
+  // otherwise) can only be logged, never reported back to this client
+  try {
+    await replica.push();
+  } catch (err) {
+    console.error(
+      isDecryptFailure(err)
+        ? 'vault server error: mcp write-back failed to decrypt (check VAULT_PASSPHRASE)'
+        : `vault server error (mcp write-back): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 export function createVaultServer(opts: VaultServerOptions): Server {
   const store = new DirBackend(join(opts.dataDir, 'store'));
   const replica = opts.passphrase ? new Replica(opts.dataDir, opts.passphrase) : null;
+  const mcpSessions = new Map<string, McpSession>();
+  // every /v1/mcp request is chained onto this promise, so a concurrent write can
+  // never interleave with another request's replica sync (defense in depth alongside
+  // Replica's own in-flight guard, which protects even against callers outside this queue)
+  let mcpQueue: Promise<void> = Promise.resolve();
   const expected = Buffer.from(opts.token);
 
   const authed = (req: IncomingMessage): boolean => {
@@ -146,12 +247,10 @@ export function createVaultServer(opts: VaultServerOptions): Server {
         if (!opts.passphrase) {
           return sendJson(res, 503, { error: 'Remote MCP needs VAULT_PASSPHRASE on the server. Without it this server is a pure encrypted sync store.' });
         }
-        await replica!.fresh();
         const body = JSON.parse((await readBody(req)).toString('utf8'));
-        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-        const mcpServer = buildServer(replica!.dir);
-        await mcpServer.connect(transport);
-        return transport.handleRequest(req, res, body);
+        const task = mcpQueue.then(() => handleMcpRequest(replica!, mcpSessions, req, res, body));
+        mcpQueue = task.then(() => undefined, () => undefined);
+        return task;
       }
 
       return sendJson(res, 404, { error: 'not found' });

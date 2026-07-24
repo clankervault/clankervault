@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpDir } from './helpers.js';
 
@@ -65,20 +66,18 @@ describe('two devices through the HTTP server', () => {
   });
 });
 
-async function mcp(base: string, token: string, body: unknown): Promise<{ status: number; json: any }> {
-  const res = await fetch(`${base}/v1/mcp`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-    },
-    body: JSON.stringify(body),
-  });
+async function mcp(base: string, token: string, body: unknown, sessionId?: string): Promise<{ status: number; json: any; sessionId?: string }> {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${token}`,
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+  };
+  if (sessionId) headers['mcp-session-id'] = sessionId;
+  const res = await fetch(`${base}/v1/mcp`, { method: 'POST', headers, body: JSON.stringify(body) });
   const text = await res.text();
   let json: any = null;
   try { json = JSON.parse(text.replace(/^data: /m, '').trim().split('\n').pop()!); } catch { /* non-JSON */ }
-  return { status: res.status, json };
+  return { status: res.status, json, sessionId: res.headers.get('mcp-session-id') ?? undefined };
 }
 
 describe('remote MCP endpoint', () => {
@@ -121,13 +120,75 @@ describe('remote MCP endpoint', () => {
     });
     expect(init.status).toBe(200);
     expect(init.json.result.serverInfo.name).toBe('vault');
+    expect(init.sessionId).toBeTruthy();
 
     const call = await mcp(mcpBase, TOKEN, {
       jsonrpc: '2.0', id: 2, method: 'tools/call',
       params: { name: 'get_context', arguments: { project: 'demo' } },
-    });
+    }, init.sessionId);
     expect(call.status).toBe(200);
     expect(call.json.result.content[0].text).toContain('Server round trip');
+  });
+
+  it('remember through a session carries real client provenance, not mcp:unknown', async () => {
+    const init = await mcp(mcpBase, TOKEN, {
+      jsonrpc: '2.0', id: 3, method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'remote-test', version: '1.0.0' } },
+    });
+    const sid = init.sessionId!;
+
+    const res = await mcp(mcpBase, TOKEN, {
+      jsonrpc: '2.0', id: 4, method: 'tools/call',
+      params: { name: 'remember', arguments: { project: 'demo', type: 'fact', title: 'Provenance check' } },
+    }, sid);
+    expect(res.status).toBe(200);
+    expect(res.json.result.content[0].text).toMatch(/unconfirmed/);
+
+    // read the written record back through an independent client sync (not the
+    // server's own replica dir), so this is an end-to-end check of what actually
+    // reached the ciphertext store, not just what's sitting in server memory
+    const reader = join(tmpDir(), 'provenance-reader');
+    cli(['init', reader]);
+    cli(['--vault', reader, 'sync', 'setup', '--url', mcpBase, '--token', TOKEN, '--passphrase', 'p']);
+    expect(cli(['--vault', reader, 'sync']).code).toBe(0);
+    const projDir = readdirSync(join(reader, 'projects')).find((d) => d.startsWith('demo'))!;
+    const files = readdirSync(join(reader, 'projects', projDir, 'records'));
+    const recFile = files.find((f) => f.includes('provenance-check'))!;
+    const raw = readFileSync(join(reader, 'projects', projDir, 'records', recFile), 'utf8');
+    expect(raw).toContain('mcp:remote-test');
+    expect(raw).not.toContain('mcp:unknown');
+  });
+
+  it('serializes concurrent remember calls with no loss and immediate write-back', async () => {
+    const init = await mcp(mcpBase, TOKEN, {
+      jsonrpc: '2.0', id: 5, method: 'initialize',
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'concurrent-test', version: '1.0.0' } },
+    });
+    const sid = init.sessionId!;
+    const titles = ['Concurrent A', 'Concurrent B', 'Concurrent C', 'Concurrent D', 'Concurrent E'];
+
+    // 5 concurrent writes on the same session: the server's mcp request queue must
+    // serialize them (no lost update from two syncOnce scans of the replica
+    // interleaving) and push each one to the ciphertext store immediately, not after
+    // 15s of otherwise-idle traffic
+    await Promise.all(titles.map((title, i) => mcp(mcpBase, TOKEN, {
+      jsonrpc: '2.0', id: 100 + i, method: 'tools/call',
+      params: { name: 'remember', arguments: { project: 'demo', type: 'fact', title } },
+    }, sid)));
+
+    const reader = join(tmpDir(), 'concurrent-reader');
+    cli(['init', reader]);
+    cli(['--vault', reader, 'sync', 'setup', '--url', mcpBase, '--token', TOKEN, '--passphrase', 'p']);
+    expect(cli(['--vault', reader, 'sync']).code).toBe(0);
+    const firstList = cli(['--vault', reader, 'list', '-p', 'demo']).out;
+    for (const title of titles) expect(firstList).toContain(title);
+
+    // a second server-side sync cycle (any further mcp traffic through the queue)
+    // must not delete anything already pushed
+    await mcp(mcpBase, TOKEN, { jsonrpc: '2.0', id: 200, method: 'tools/list' }, sid);
+    expect(cli(['--vault', reader, 'sync']).code).toBe(0);
+    const secondList = cli(['--vault', reader, 'list', '-p', 'demo']).out;
+    for (const title of titles) expect(secondList).toContain(title);
   });
 
   it('refuses without a token', async () => {

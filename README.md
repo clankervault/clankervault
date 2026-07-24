@@ -165,13 +165,15 @@ registering it, nothing else in the CLI or compiler needs to change.
 
 ## Sync
 
-`vault sync` reconciles a vault edited from more than one device, without git
-and without a server. There is no cloud service to sign up for: the remote
-is just a folder, so anything that already keeps a folder in sync between
-your machines works, iCloud Drive, Dropbox, a NAS mount, a USB drive. `vault`
-only ever writes encrypted objects into that folder; the storage side (v1
-ships `dir`, a plain directory backend) is a small pluggable interface, so a
-future backend could talk to an actual server without changing anything else.
+`vault sync` reconciles a vault edited from more than one device, without
+git. In folder mode there is no server and no cloud account: the remote is
+just a folder, so anything that already keeps a folder in sync between your
+machines works, iCloud Drive, Dropbox, a NAS mount, a USB drive. The http
+mode below (see Self-hosting) talks to your own self-hosted `vault serve`
+instead. `vault` only ever writes encrypted objects into whichever remote you
+configured; the storage side (v1 ships `dir`, a plain directory backend, and
+`http`, talking to `vault serve`) is a small pluggable interface, open to
+further backends without changing anything else.
 
 Everything that leaves this machine is end-to-end encrypted first: file
 contents, file paths and the manifest that lists them are all encrypted with
