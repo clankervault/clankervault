@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpDir } from './helpers.js';
 
@@ -15,21 +15,27 @@ function cli(args: string[], env: Record<string, string> = {}) {
   return { code: r.status, out: r.stdout + r.stderr };
 }
 
-beforeAll(async () => {
-  const data = tmpDir();
-  proc = spawn('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), 'serve', '--data', data, '--port', '0'], {
+/** spawn a real `vault serve` subprocess on an OS-assigned port and resolve once its
+ *  startup line is seen; shared by every test in this file that needs its own server */
+async function spawnVaultServer(dataDir: string, env: Record<string, string>): Promise<{ proc: ChildProcess; base: string }> {
+  const child = spawn('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), 'serve', '--data', dataDir, '--port', '0'], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, VAULT_SERVER_TOKEN: TOKEN },
+    env: { ...process.env, ...env },
   });
-  base = await new Promise<string>((resolve, reject) => {
+  const url = await new Promise<string>((resolve, reject) => {
     let buf = '';
-    proc.stdout!.on('data', (c: Buffer) => {
+    child.stdout!.on('data', (c: Buffer) => {
       buf += c.toString();
       const m = buf.match(/listening on :(\d+)/);
       if (m) resolve(`http://127.0.0.1:${m[1]}`);
     });
     setTimeout(() => reject(new Error(`server did not start: ${buf}`)), 30000);
   });
+  return { proc: child, base: url };
+}
+
+beforeAll(async () => {
+  ({ proc, base } = await spawnVaultServer(tmpDir(), { VAULT_SERVER_TOKEN: TOKEN }));
 }, 60000);
 afterAll(() => { proc?.kill(); });
 
@@ -87,20 +93,7 @@ describe('remote MCP endpoint', () => {
   beforeAll(async () => {
     // own data dir and own server process (passphrase-bearing) - sharing the Task 2
     // server's data dir would race its manifest CAS with the round-trip test above
-    const data = tmpDir();
-    mcpProc = spawn('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), 'serve', '--data', data, '--port', '0'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, VAULT_SERVER_TOKEN: TOKEN, VAULT_PASSPHRASE: 'p' },
-    });
-    mcpBase = await new Promise<string>((resolve, reject) => {
-      let buf = '';
-      mcpProc.stdout!.on('data', (c: Buffer) => {
-        buf += c.toString();
-        const m = buf.match(/listening on :(\d+)/);
-        if (m) resolve(`http://127.0.0.1:${m[1]}`);
-      });
-      setTimeout(() => reject(new Error(`mcp server did not start: ${buf}`)), 30000);
-    });
+    ({ proc: mcpProc, base: mcpBase } = await spawnVaultServer(tmpDir(), { VAULT_SERVER_TOKEN: TOKEN, VAULT_PASSPHRASE: 'p' }));
 
     // seed the server through a client vault: setup, create the project and record,
     // then sync so the ciphertext store has something for the server's replica to decrypt
@@ -190,6 +183,52 @@ describe('remote MCP endpoint', () => {
     const secondList = cli(['--vault', reader, 'list', '-p', 'demo']).out;
     for (const title of titles) expect(secondList).toContain(title);
   });
+
+  it('survives a corrupted store manifest instead of crashing the process', async () => {
+    // a DEDICATED server + data dir: fresh() has never run on its Replica yet
+    // (lastSync stays 0), so the very first /v1/mcp request below cannot be skipped
+    // by the 15s freshness throttle - it is guaranteed to hit the corrupted manifest
+    const dataDir = tmpDir();
+    const { proc: crashProc, base: crashBase } = await spawnVaultServer(dataDir, { VAULT_SERVER_TOKEN: TOKEN, VAULT_PASSPHRASE: 'p' });
+    try {
+      // seed through the ordinary sync endpoints only - this never touches the
+      // server's Replica or mcp machinery at all
+      const client = join(tmpDir(), 'crash-client');
+      cli(['init', client]);
+      cli(['--vault', client, 'sync', 'setup', '--url', crashBase, '--token', TOKEN, '--passphrase', 'p']);
+      cli(['--vault', client, 'project', 'new', 'Demo']);
+      cli(['--vault', client, 'add', 'fact', 'Seed record', '-p', 'demo']);
+      cli(['--vault', client, 'sync']);
+
+      const manifestPath = join(dataDir, 'store', 'manifest.json');
+      const original = readFileSync(manifestPath, 'utf8');
+      writeFileSync(manifestPath, 'not json at all {{{');
+
+      const broken = await mcp(crashBase, TOKEN, {
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'crash-test', version: '1.0.0' } },
+      });
+      expect(broken.status).toBe(500);
+      expect(typeof broken.json.error).toBe('string');
+      expect(broken.json.error).not.toMatch(/\//); // no filesystem path leaked into the response
+
+      writeFileSync(manifestPath, original);
+
+      // the process itself must still be up: a plain authenticated health check,
+      // then one more real mcp request, both against the SAME still-running process
+      const health = await fetch(`${crashBase}/v1/health`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      expect(health.status).toBe(200);
+
+      const recovered = await mcp(crashBase, TOKEN, {
+        jsonrpc: '2.0', id: 2, method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'crash-test', version: '1.0.0' } },
+      });
+      expect(recovered.status).toBe(200);
+      expect(recovered.json.result.serverInfo.name).toBe('vault');
+    } finally {
+      crashProc.kill();
+    }
+  }, 30000);
 
   it('refuses without a token', async () => {
     const res = await fetch(`${mcpBase}/v1/mcp`, { method: 'POST', body: '{}' });

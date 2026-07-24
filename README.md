@@ -321,6 +321,12 @@ MCP endpoint: enabled at /v1/mcp
 MCP endpoint: disabled (set VAULT_PASSPHRASE to enable)
 ```
 
+Every `/v1/mcp` request is processed one at a time, in arrival order, on a
+single queue: correct under concurrent writes from multiple assistants (never
+two at once scanning the decrypted replica, never a lost update), but this
+makes remote MCP a single-tenant convenience for one operator's own devices,
+not something built to serve many simultaneous users at scale.
+
 **Docker.** The image builds from source (`npm ci`, `tsc`, then
 `npm prune --omit=dev`) and its entrypoint is `vault serve --data /data
 --port 8484`:

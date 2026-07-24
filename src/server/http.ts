@@ -114,6 +114,11 @@ function sweepIdleMcpSessions(sessions: Map<string, McpSession>): void {
  * made reaches the remote immediately rather than waiting out the freshness window.
  * Callers must run this serialized per server (see mcpQueue in createVaultServer):
  * this function alone does not guard against two of its own invocations racing.
+ *
+ * Any error other than a caught decrypt failure propagates to the caller, which MUST
+ * turn it into a response itself (see the .catch() at the /v1/mcp call site) - this
+ * function only ever resolves or rejects, it never lets an exception fall through
+ * to Node with no response sent and no handler watching.
  */
 async function handleMcpRequest(
   replica: Replica,
@@ -123,45 +128,55 @@ async function handleMcpRequest(
   body: unknown,
 ): Promise<void> {
   sweepIdleMcpSessions(sessions);
+  // set once a NEW session gets registered by onsessioninitialized; if anything
+  // later in this same request throws, that half-initialized session (registered,
+  // but its own initialize response never finished) must not be left behind for a
+  // later request bearing its session ID to stumble into
+  let newSessionId: string | undefined;
 
   try {
-    await replica.fresh();
-  } catch (err) {
-    if (isDecryptFailure(err)) {
-      return sendJson(res, 500, { error: 'server cannot decrypt the store (check VAULT_PASSPHRASE on the server)' });
+    try {
+      await replica.fresh();
+    } catch (err) {
+      if (isDecryptFailure(err)) {
+        return sendJson(res, 500, { error: 'server cannot decrypt the store (check VAULT_PASSPHRASE on the server)' });
+      }
+      throw err;
     }
-    throw err;
+
+    const sessionIdHeader = req.headers['mcp-session-id'];
+    const sessionId = typeof sessionIdHeader === 'string' ? sessionIdHeader : undefined;
+
+    let transport: StreamableHTTPServerTransport;
+    if (sessionId && sessions.has(sessionId)) {
+      const session = sessions.get(sessionId)!;
+      session.lastUsed = Date.now();
+      transport = session.transport;
+    } else if (!sessionId && isInitializeRequest(body)) {
+      const server = buildServer(replica.dir);
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        enableJsonResponse: true,
+        onsessioninitialized: (id) => { newSessionId = id; sessions.set(id, { server, transport, lastUsed: Date.now() }); },
+      });
+      transport.onclose = () => {
+        const sid = transport.sessionId;
+        if (sid) sessions.delete(sid);
+      };
+      await server.connect(transport);
+    } else {
+      return sendJson(res, 400, {
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+        id: null,
+      });
+    }
+
+    await transport.handleRequest(req, res, body);
+  } catch (err) {
+    if (newSessionId) sessions.delete(newSessionId);
+    throw err; // the call site's .catch() is what actually produces a response
   }
-
-  const sessionIdHeader = req.headers['mcp-session-id'];
-  const sessionId = typeof sessionIdHeader === 'string' ? sessionIdHeader : undefined;
-
-  let transport: StreamableHTTPServerTransport;
-  if (sessionId && sessions.has(sessionId)) {
-    const session = sessions.get(sessionId)!;
-    session.lastUsed = Date.now();
-    transport = session.transport;
-  } else if (!sessionId && isInitializeRequest(body)) {
-    const server = buildServer(replica.dir);
-    transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      enableJsonResponse: true,
-      onsessioninitialized: (id) => { sessions.set(id, { server, transport, lastUsed: Date.now() }); },
-    });
-    transport.onclose = () => {
-      const sid = transport.sessionId;
-      if (sid) sessions.delete(sid);
-    };
-    await server.connect(transport);
-  } else {
-    return sendJson(res, 400, {
-      jsonrpc: '2.0',
-      error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
-      id: null,
-    });
-  }
-
-  await transport.handleRequest(req, res, body);
 
   // the response is already sent by this point, so a push failure here (decrypt or
   // otherwise) can only be logged, never reported back to this client
@@ -250,7 +265,20 @@ export function createVaultServer(opts: VaultServerOptions): Server {
         const body = JSON.parse((await readBody(req)).toString('utf8'));
         const task = mcpQueue.then(() => handleMcpRequest(replica!, mcpSessions, req, res, body));
         mcpQueue = task.then(() => undefined, () => undefined);
-        return task;
+        // a bare `return task` would hand the outer async handler's own completion
+        // promise straight to the mcp queue, and Node never awaits or catches a
+        // request listener's return value - an mcp failure other than the
+        // already-handled decrypt case would become an unhandled rejection and
+        // could take the whole process down. Catching right here, on the exact
+        // promise being returned, is what actually keeps this response (and the
+        // process) alive.
+        return task.catch((err) => {
+          console.error('vault server error:', err);
+          if (res.headersSent) return;
+          sendJson(res, 500, isDecryptFailure(err)
+            ? { error: 'server cannot decrypt the store (check VAULT_PASSPHRASE on the server)' }
+            : { error: 'internal error' });
+        });
       }
 
       return sendJson(res, 404, { error: 'not found' });

@@ -4,6 +4,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import type { Backend } from './backend.js';
 import { VersionConflictError } from './backend.js';
 import { deriveKey, decrypt, encrypt, objectKey } from './crypto.js';
+import type { SyncKey } from './crypto.js';
 import { decodeManifest, emptyManifest, encodeManifest } from './manifest.js';
 import type { Manifest } from './manifest.js';
 
@@ -81,12 +82,19 @@ const MAX_ATTEMPTS = 3;
  * (undefined if tombstoned/absent), last-synced hash S. See task-4-brief.md for the
  * full merge rules table. Retries the whole cycle on a concurrent manifest write
  * (CAS version conflict), re-pulling a fresh manifest each attempt.
+ *
+ * `precomputedKey`, when given, skips both `deriveKey` and the `getSalt` round trip
+ * that feeds it (scrypt is deliberately expensive, so a caller that already derived
+ * the key for this exact passphrase/salt pair - e.g. the server's Replica, which
+ * would otherwise pay that cost on every single mcp request - can reuse it here).
+ * `backend.ensure()` always still runs regardless.
  */
 export async function syncOnce(
   vaultDir: string, backend: Backend, passphrase: string, deviceName: string,
+  precomputedKey?: SyncKey,
 ): Promise<SyncResult> {
   await backend.ensure();
-  const key = deriveKey(passphrase, await backend.getSalt());
+  const key = precomputedKey ?? deriveKey(passphrase, await backend.getSalt());
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const remote = await backend.getManifest();
