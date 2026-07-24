@@ -26,8 +26,10 @@ overwrite directly, because it tracks what is happening right now.
 `fact`, `recipe`, `decision` and `taste` records also carry `status`
 (`unconfirmed`, `confirmed` or `superseded`) and `confidence`
 (`high`, `medium`, `low`). Records written by hand through `vault add` are
-`confirmed`/`high` by default; unconfirmed records are for a future mining
-layer that proposes memory from AI transcripts (see Roadmap).
+`confirmed`/`high` by default; unconfirmed records come from an assistant
+proposing memory live through the MCP server's `remember` tool, or from
+`vault mine` reading your AI session transcripts (see MCP server and Mining
+below), and only take effect once a human confirms them.
 
 ## Vault structure
 
@@ -274,13 +276,64 @@ argument: pass `lenses: false` when you want project facts and state without
 the personal layer (`profile` and `taste`), for a context you plan to hand to
 someone else or paste somewhere less private.
 
+## Mining
+
+`vault mine` finds durable, reusable knowledge already sitting in your AI
+coding sessions and proposes it as `unconfirmed` records, so you do not have
+to write everything into the vault by hand. The first reader is Claude Code:
+it reads the JSONL transcripts Claude Code already keeps under
+`~/.claude/projects/`, incrementally, one file at a time, tracking a byte
+offset per file so a run only ever looks at what is new since the last one.
+A trailing, not-yet-complete line is left for next time rather than parsed
+half-written.
+
+Each new chunk of transcript text is resolved to a project the same way the
+CLI already does (`.vault-id`, `device.yaml`, git remote, path prefix, from
+the session's working directory), then handed to an extractor along with the
+titles of that project's existing, non-superseded records, so it can skip
+anything already known and flag genuine contradictions instead of silently
+duplicating. The shipped extractor shells out to the `claude` CLI already
+installed and logged into your own account, no separate API key, with a
+prompt that frames the transcript explicitly as data to analyze, not
+instructions to follow, and asks for at most five items and an empty array
+over noise.
+
+```bash
+vault mine                 # one pass over new transcript data
+vault mine --dry-run       # show what would be created, write nothing
+vault mine --watch         # keep running, mine every --interval seconds (default 300)
+```
+
+Mined records are born `unconfirmed`, carry
+`source: { tool: 'claude-code', transcript: <path>, approx_range: 'bytes <from>-<to>' }`,
+and never compile or show up in `get_context` until a human confirms them,
+same as anything the MCP server proposes. Something that contradicts an
+existing record comes back tagged `contradicts`, its body prefixed with
+`Contradicts: <old title>`, for you to resolve by hand with `vault supersede`;
+mined data never auto-supersedes a confirmed record.
+
+Two ways out of `unconfirmed`: `vault confirm <id>` by hand, or
+`vault settle --days <n>` (default 14), which confirms every `unconfirmed`,
+`confidence: high` record older than that many days, for one project with
+`--project` or across all of them without it. `vault settle` never touches
+medium- or low-confidence records, and never touches a record whose
+`source.tool` starts with `mcp`: anything an assistant proposed live through
+the MCP server still needs an explicit `vault confirm`.
+
+Per-file offsets live in `.mine/offsets.json`, already on the sync exclusion
+list (per-device, like `device.yaml`), since what a given machine has
+already read out of its own `~/.claude/projects/` has no meaning on another
+one.
+
 ## Roadmap
 
-Phase 1 (the format plus this CLI), phase 2 (sync) and phase 3 (this MCP
-server) are implemented and tested. Still out of scope, and coming later:
+Phase 1 (the format plus this CLI), phase 2 (sync), phase 3 (the MCP server)
+and phase 4 (mining) are implemented and tested. Still out of scope, and
+coming later:
 
-- **Mining**: proposing `unconfirmed` records straight from AI conversation
-  transcripts instead of writing them by hand.
+- **More mining readers**: Codex session logs, Cursor, best-effort, meant to
+  slot in behind the same reader/extractor interfaces without changing
+  `vault mine` or the CLI.
 - **Hosted MCP endpoint**: a remote, always-on server instead of the stdio
   process each client launches locally today.
 
