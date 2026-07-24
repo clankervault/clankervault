@@ -62,12 +62,16 @@ export interface SyncResult {
   conflicts: string[];
 }
 
-/** projects/x/state.md + mini -> projects/x/state.conflict-mini.md */
-export function conflictPath(relpath: string, device: string): string {
+/**
+ * projects/x/state.md + mini + 20260724142530 -> projects/x/state.conflict-mini-20260724142530.md
+ * the stamp disambiguates repeated conflicts on the same path/device pair so conflict
+ * copies never overwrite each other.
+ */
+export function conflictPath(relpath: string, device: string, stamp: string): string {
   const dot = relpath.lastIndexOf('.');
   const slash = relpath.lastIndexOf('/');
-  if (dot > slash) return `${relpath.slice(0, dot)}.conflict-${device}${relpath.slice(dot)}`;
-  return `${relpath}.conflict-${device}`;
+  if (dot > slash) return `${relpath.slice(0, dot)}.conflict-${device}-${stamp}${relpath.slice(dot)}`;
+  return `${relpath}.conflict-${device}-${stamp}`;
 }
 
 const MAX_ATTEMPTS = 3;
@@ -114,7 +118,8 @@ export async function syncOnce(
     };
     const tombstone = async (rel: string) => {
       const entry = manifest.files[rel];
-      manifest.files[rel] = { ...entry, deleted: true, mtimeMs: Date.now(), modifiedBy: deviceName };
+      // clear content-identifying fields; all readers must still guard on `deleted`, not on hash/size
+      manifest.files[rel] = { ...entry, hash: '', size: 0, deleted: true, mtimeMs: Date.now(), modifiedBy: deviceName };
       await backend.deleteObject(objectKey(key, rel));
       dirty = true;
       result.deletedRemote.push(rel);
@@ -145,16 +150,18 @@ export async function syncOnce(
       if (localHash === remoteHash) continue;                    // converged independently
       if (localHash === undefined) { await download(rel); continue; }   // edit beats delete
       if (remoteHash === undefined) { await upload(rel); continue; }
-      // true conflict: last write wins, loser preserved
+      // true conflict: last write wins, loser preserved as a timestamped conflict copy;
+      // an exact mtime tie deliberately favors local (deterministic, no coin flip)
       const localWins = local[rel].mtimeMs >= entry.mtimeMs;
+      const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
       if (localWins) {
         const remoteContent = decrypt(key, await backend.getObject(objectKey(key, rel)));
-        const copy = conflictPath(rel, entry.modifiedBy);
+        const copy = conflictPath(rel, entry.modifiedBy, stamp);
         writeLocal(copy, remoteContent);
         await upload(copy);
         await upload(rel);
       } else {
-        const copy = conflictPath(rel, deviceName);
+        const copy = conflictPath(rel, deviceName, stamp);
         writeLocal(copy, readLocal(rel));
         await upload(copy);
         await download(rel);

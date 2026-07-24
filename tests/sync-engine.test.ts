@@ -7,6 +7,7 @@ import { deriveKey } from '../src/sync/crypto.js';
 import { emptyManifest, encodeManifest, decodeManifest } from '../src/sync/manifest.js';
 import { isExcluded, scanLocal, readSyncState, writeSyncState, syncOnce, conflictPath } from '../src/sync/engine.js';
 import { DirBackend } from '../src/sync/backend.js';
+import type { Backend } from '../src/sync/backend.js';
 import { createProject } from '../src/project.js';
 import { createRecord, listRecords } from '../src/records.js';
 import { tmpDir } from './helpers.js';
@@ -115,11 +116,66 @@ describe('syncOnce: two simulated devices', () => {
 
     expect(rf(stateA, 'utf8')).toContain('mini');       // winner content everywhere
     expect(rf(stateB, 'utf8')).toContain('mini');
-    const conflictFile = join(B, 'projects', p.id, 'state.conflict-macbook.md');
-    expect(existsSync(conflictFile)).toBe(true);        // loser content preserved
-    expect(rf(conflictFile, 'utf8')).toContain('macbook');
+    const conflictNameRe = /^state\.conflict-macbook-\d{14}\.md$/;
+    const projDirB = join(B, 'projects', p.id);
+    const copyNameB = readdirSync(projDirB).find((n) => conflictNameRe.test(n));
+    expect(copyNameB).toBeDefined();                    // loser content preserved, timestamped
+    expect(rf(join(projDirB, copyNameB!), 'utf8')).toContain('macbook');
     // and the conflict copy itself syncs back to A
-    expect(existsSync(join(A, 'projects', p.id, 'state.conflict-macbook.md'))).toBe(true);
+    const projDirA = join(A, 'projects', p.id);
+    const copyNameA = readdirSync(projDirA).find((n) => conflictNameRe.test(n));
+    expect(copyNameA).toBeDefined();
+  });
+
+  it('retries and succeeds through a live concurrent manifest race', async () => {
+    const remote = tmpDir();
+    const A = newDevice('macbook');
+    const B = newDevice('mini');
+    const C = newDevice('desktop');
+    const p = createProject(A, 'Demo');
+    await syncOnce(A, new DirBackend(remote), 'pass', 'macbook');
+    await syncOnce(B, new DirBackend(remote), 'pass', 'mini');
+    await syncOnce(C, new DirBackend(remote), 'pass', 'desktop');
+    // the records dir is empty at this point so it never synced down to C as a file;
+    // createRecord assumes the dir exists (createProject makes it locally on A only)
+    mkdirSync(join(C, 'projects', p.id, 'records'), { recursive: true });
+
+    // A queues a local change to push.
+    createRecord(A, p.id, { type: 'fact', title: 'Race winner' });
+
+    // Wraps a real DirBackend; on its FIRST putManifest call only, it lets a second
+    // device genuinely push through its own DirBackend first (a real concurrent
+    // manifest update, not a fabricated one), so the delegated call is guaranteed
+    // to see a stale expectedVersion and throw VersionConflictError for real.
+    class RacingBackend implements Backend {
+      putManifestCalls = 0;
+      constructor(private inner: Backend) {}
+      async ensure(): Promise<void> { return this.inner.ensure(); }
+      async getSalt(): Promise<Buffer> { return this.inner.getSalt(); }
+      async getManifest() { return this.inner.getManifest(); }
+      async putManifest(data: Buffer, expectedVersion: string | null): Promise<string> {
+        this.putManifestCalls++;
+        if (this.putManifestCalls === 1) {
+          createRecord(C, p.id, { type: 'recipe', title: 'Concurrent push' });
+          await syncOnce(C, new DirBackend(remote), 'pass', 'desktop');
+        }
+        return this.inner.putManifest(data, expectedVersion);
+      }
+      async getObject(k: string) { return this.inner.getObject(k); }
+      async putObject(k: string, d: Buffer) { return this.inner.putObject(k, d); }
+      async deleteObject(k: string) { return this.inner.deleteObject(k); }
+    }
+
+    const racing = new RacingBackend(new DirBackend(remote));
+    const result = await syncOnce(A, racing, 'pass', 'macbook');
+    expect(result.uploaded.length).toBeGreaterThan(0);
+    expect(racing.putManifestCalls).toBeGreaterThanOrEqual(2);
+
+    // both A's push and C's concurrent push must have landed on the shared remote
+    await syncOnce(B, new DirBackend(remote), 'pass', 'mini');
+    const titles = listRecords(B, p.id).map((r) => r.title);
+    expect(titles).toContain('Race winner');
+    expect(titles).toContain('Concurrent push');
   });
 
   it('deletion propagates', async () => {
@@ -175,8 +231,10 @@ describe('syncOnce: two simulated devices', () => {
 });
 
 describe('conflictPath', () => {
-  it('inserts the device before the extension', () => {
-    expect(conflictPath('projects/x/state.md', 'mini')).toBe('projects/x/state.conflict-mini.md');
-    expect(conflictPath('vault.yaml', 'mini')).toBe('vault.conflict-mini.yaml');
+  it('inserts the device and a timestamp before the extension', () => {
+    expect(conflictPath('projects/x/state.md', 'mini', '20260724142530'))
+      .toBe('projects/x/state.conflict-mini-20260724142530.md');
+    expect(conflictPath('vault.yaml', 'mini', '20260724142530'))
+      .toBe('vault.conflict-mini-20260724142530.yaml');
   });
 });
