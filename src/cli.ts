@@ -5,10 +5,12 @@ import { join, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { defaultVaultDir, initVault, readConfig, readDeviceConfig, requireVault } from './vault.js';
 import { createProject, getProject, listProjects, resolveProjectFromCwd } from './project.js';
-import { createRecord, listRecords, supersedeRecord } from './records.js';
+import { confirmRecord, createRecord, listRecords, supersedeRecord } from './records.js';
+import { searchRecords } from './search.js';
 import { applyBudget, gatherContext } from './compile.js';
 import { adapters, getAdapter } from './adapters/index.js';
 import { logAccess } from './log.js';
+import { runMcp } from './mcp.js';
 import { DirBackend } from './sync/backend.js';
 import { isExcluded, syncOnce } from './sync/engine.js';
 import type { ProjectInfo, RecordType } from './types.js';
@@ -129,6 +131,17 @@ program
   });
 
 program
+  .command('confirm')
+  .argument('<id>')
+  .option('-p, --project <ref>')
+  .description('confirm an unconfirmed record so it starts compiling')
+  .action((id: string, opts: { project?: string }) => {
+    const p = needProject(opts.project);
+    confirmRecord(vaultDir(), p.id, id);
+    console.log(`${id} confirmed`);
+  });
+
+program
   .command('state')
   .argument('[text...]', 'new state text; omit to print current state')
   .option('-p, --project <ref>')
@@ -163,13 +176,8 @@ program
   .action((query: string) => {
     const dir = requireVault(vaultDir());
     logAccess(dir, 'search', { query });
-    const q = query.toLowerCase();
-    for (const p of listProjects(dir)) {
-      for (const r of listRecords(dir, p.id)) {
-        if (r.title.toLowerCase().includes(q) || r.body.toLowerCase().includes(q)) {
-          console.log(`${p.id}  ${r.meta.id}  ${r.title}`);
-        }
-      }
+    for (const h of searchRecords(dir, query)) {
+      console.log(`${h.projectId}  ${h.record.meta.id}  ${h.record.title}`);
     }
   });
 
@@ -203,6 +211,18 @@ program
     if (ctx.droppedCount) console.log(`(${ctx.droppedCount} records over budget omitted, raise compile.token_budget in vault.yaml if needed)`);
     logAccess(dir, 'compile', { project: p.id, tools: opts.tool });
     console.log('Remember: generated files belong in .gitignore.');
+  });
+
+program
+  .command('mcp')
+  .description('run the vault as an MCP server on stdio (connect from Claude Desktop, Claude Code, etc.)')
+  .action(async () => {
+    try {
+      await runMcp(requireVault(vaultDir()));
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
   });
 
 const sync = program.command('sync').description('sync the vault with the configured remote (E2E encrypted)');

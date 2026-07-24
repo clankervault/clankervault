@@ -4,18 +4,26 @@
   "description": "Portable memory for AI tools: one plain-markdown vault, compiled into CLAUDE.md, AGENTS.md, .cursorrules and more.",
   "license": "MIT",
   "type": "module",
-  "bin": { "vault": "dist/cli.js" },
-  "files": ["dist"],
-  "engines": { "node": ">=20" },
+  "bin": {
+    "vault": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "dev": "tsx src/cli.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.1.0",
     "gray-matter": "^4.0.3",
-    "yaml": "^2.5.0"
+    "yaml": "^2.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",

@@ -228,15 +228,61 @@ possible failure mode of arbitrary third-party sync software (iCloud, Dropbox)
 racing underneath it. The passphrase, when saved with `--passphrase` instead
 of `VAULT_PASSPHRASE`, sits in `device.yaml` in plaintext on that device.
 
+## MCP server
+
+`vault compile` writes files once, ahead of time; `vault mcp` serves the
+vault live, on demand, to anything that speaks the Model Context Protocol
+(spec §5). This is the path for chat assistants that cannot read a compiled
+file off disk, and for any setup running multiple accounts of the same
+assistant, since each MCP client identifies itself in the handshake and gets
+its own provenance trail on what it wrote, rather than every account sharing
+one compiled file.
+
+Run it with `vault mcp`, or point a client at it directly. For Claude
+Desktop or Claude Code, add to the MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "vault": {
+      "command": "vault",
+      "args": ["mcp", "--vault", "/path/to/your/vault"]
+    }
+  }
+}
+```
+
+Drop `"--vault", "/path/to/your/vault"` if `VAULT_DIR` is already set, or if
+you are fine with the default `~/vault`.
+
+Four tools are exposed:
+
+| Tool | Arguments | What it does |
+|------|-----------|----------------|
+| `get_context` | `project?`, `lenses?` | Compiled context for a project: facts, recipes, decisions, taste, state. Resolves the project the same way the CLI does (`--project`-style ref, else current directory) and falls back to just the user's profile and global taste plus a list of known projects when nothing resolves. |
+| `get_state` | `project` | The project's current work in progress (`state.md`), or "Nothing in progress." when it is empty. |
+| `remember` | `project?`, `type`, `title`, `body?`, `scope?`, `tags?` | Writes a new record from inside a conversation. |
+| `search` | `query` | Keyword search across every project's records. |
+
+**Trust model.** A record written through `remember` is saved with
+`status: unconfirmed` and provenance `source.tool: mcp:<client-name>`, and it
+stays out of every compiled file and out of `get_context` until a human runs
+`vault confirm <id>`, the same gate that already applies to any other
+unconfirmed record. An assistant proposing memory about you can never make
+that memory take effect on its own. `get_context` also takes a `lenses`
+argument: pass `lenses: false` when you want project facts and state without
+the personal layer (`profile` and `taste`), for a context you plan to hand to
+someone else or paste somewhere less private.
+
 ## Roadmap
 
-Phase 1 (the format plus this CLI) and phase 2 (sync) are implemented and
-tested. Still out of scope, and coming later:
+Phase 1 (the format plus this CLI), phase 2 (sync) and phase 3 (this MCP
+server) are implemented and tested. Still out of scope, and coming later:
 
-- **MCP server**: structured, on-demand querying of the vault instead of a
-  full recompile per tool.
 - **Mining**: proposing `unconfirmed` records straight from AI conversation
   transcripts instead of writing them by hand.
+- **Hosted MCP endpoint**: a remote, always-on server instead of the stdio
+  process each client launches locally today.
 
 The on-disk format and this CLI's commands are meant to stay stable through
 all of that: a vault you start today should keep working unmodified once
