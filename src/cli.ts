@@ -13,6 +13,8 @@ import { logAccess } from './log.js';
 import { runMcp } from './mcp.js';
 import { DirBackend } from './sync/backend.js';
 import { isExcluded, syncOnce } from './sync/engine.js';
+import { ClaudeCliExtractor } from './mine/extract.js';
+import { mineOnce, settleRecords } from './mine/mine.js';
 import type { ProjectInfo, RecordType } from './types.js';
 
 /** wrong-passphrase decryption failures surface as a raw AES-GCM error; give a human reason instead */
@@ -223,6 +225,57 @@ program
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
+  });
+
+program
+  .command('mine')
+  .option('--root <dir>', 'transcript root (default: ~/.claude/projects)')
+  .option('--dry-run', 'show what would be created without writing')
+  .option('--watch', 'keep running, mine every interval')
+  .option('--interval <s>', 'watch interval seconds', '300')
+  .description('mine session transcripts into unconfirmed records (claude-code reader)')
+  .action(async (opts: { root?: string; dryRun?: boolean; watch?: boolean; interval: string }) => {
+    try {
+      const dir = requireVault(vaultDir());
+      let intervalMs = 0;
+      if (opts.watch) {
+        const interval = Number(opts.interval);
+        if (!Number.isFinite(interval) || interval <= 0) {
+          console.error(`Invalid --interval "${opts.interval}"`);
+          process.exit(1);
+        }
+        intervalMs = interval * 1000;
+      }
+      const extractor = new ClaudeCliExtractor();
+      const runOnce = async () => {
+        const r = await mineOnce(dir, extractor, { root: opts.root, dryRun: opts.dryRun });
+        console.log(`mined: ${r.created.length} new records from ${r.chunksMined} chunks (${r.skippedDuplicates} duplicates, ${r.skippedNoProject} chunks without a matching project)`);
+        for (const c of r.created) console.log(`  ${c.id}  [${c.projectId}]  ${c.title}`);
+        if (r.created.length && !opts.dryRun) console.log('Review them with `vault list`, release with `vault confirm <id>` or let `vault settle` confirm them after they age.');
+      };
+      await runOnce();
+      if (opts.watch) {
+        setInterval(() => { runOnce().catch((e) => console.error(e instanceof Error ? e.message : String(e))); }, intervalMs);
+        console.log(`mining every ${opts.interval}s, Ctrl+C to stop`);
+      }
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('settle')
+  .option('--days <n>', 'minimum age in days', '14')
+  .option('-p, --project <ref>')
+  .description('confirm aged unconfirmed high-confidence records (never MCP-written ones)')
+  .action((opts: { days: string; project?: string }) => {
+    const dir = requireVault(vaultDir());
+    const days = Number(opts.days);
+    if (!Number.isFinite(days) || days < 0) { console.error(`Invalid --days "${opts.days}"`); process.exit(1); }
+    const projectId = opts.project ? needProject(opts.project).id : undefined;
+    const { confirmed } = settleRecords(dir, { days, projectId });
+    console.log(confirmed.length ? `settled: ${confirmed.join(', ')}` : 'nothing old enough to settle');
   });
 
 const sync = program.command('sync').description('sync the vault with the configured remote (E2E encrypted)');
