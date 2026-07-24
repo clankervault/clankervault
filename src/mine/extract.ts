@@ -25,13 +25,50 @@ export interface Extractor {
 const TYPES = new Set(['fact', 'recipe', 'decision', 'taste']);
 const CONFIDENCES = new Set(['high', 'medium', 'low']);
 
+/**
+ * Scan raw for a top-level JSON array, tracking bracket depth and JSON string state
+ * (so brackets inside quoted strings, including escaped quotes, do not confuse the scan).
+ * Prose can mention brackets before the real payload (a markdown `[]` example, a range
+ * like "[1-5]"), so every '[' in the text is tried and the LAST span that actually
+ * parses to a JSON array wins, since the model's real output comes last.
+ */
+function extractJsonArray(raw: string): string | null {
+  let last: string | null = null;
+  for (let start = raw.indexOf('['); start >= 0; start = raw.indexOf('[', start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let j = start; j < raw.length; j++) {
+      const ch = raw[j];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') { inString = true; continue; }
+      if (ch === '[' || ch === '{') depth++;
+      else if (ch === ']' || ch === '}') {
+        depth--;
+        if (depth === 0) { end = j; break; }
+      }
+    }
+    if (end < 0) continue;                // unbalanced from this '[': try the next one
+    const span = raw.slice(start, end + 1);
+    try {
+      if (Array.isArray(JSON.parse(span))) last = span;
+    } catch { /* not valid JSON at this position: try the next '[' */ }
+  }
+  return last;
+}
+
 /** strict: invalid candidates are dropped, never repaired */
 export function parseCandidates(raw: string): Candidate[] {
-  const start = raw.indexOf('[');
-  const end = raw.lastIndexOf(']');
-  if (start < 0 || end <= start) return [];
+  const span = extractJsonArray(raw);
+  if (!span) return [];
   let arr: unknown;
-  try { arr = JSON.parse(raw.slice(start, end + 1)); } catch { return []; }
+  try { arr = JSON.parse(span); } catch { return []; }
   if (!Array.isArray(arr)) return [];
   const out: Candidate[] = [];
   for (const item of arr) {

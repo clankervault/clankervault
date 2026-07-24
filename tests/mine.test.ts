@@ -22,6 +22,14 @@ describe('parseCandidates', () => {
     expect(parseCandidates('no json here')).toEqual([]);
     expect(parseCandidates('{"not":"array"}')).toEqual([]);
   });
+  it('does not fail closed on a trivial `[]` example mentioned before the real array', () => {
+    const raw = 'an empty result would be `[]` but here are some: [{"type":"fact","title":"t","body":"","confidence":"high"}]';
+    expect(parseCandidates(raw)).toHaveLength(1);
+  });
+  it('does not fail closed on a bracketed range mentioned before the real array', () => {
+    const raw = 'Confidence score [1-5] scale applies. [{"type":"fact","title":"t2","body":"","confidence":"high"}]';
+    expect(parseCandidates(raw)).toHaveLength(1);
+  });
 });
 
 describe('buildPrompt', () => {
