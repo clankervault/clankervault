@@ -63,9 +63,9 @@ export interface SyncResult {
 }
 
 /**
- * projects/x/state.md + mini + 20260724142530 -> projects/x/state.conflict-mini-20260724142530.md
- * the stamp disambiguates repeated conflicts on the same path/device pair so conflict
- * copies never overwrite each other.
+ * projects/x/state.md + mini + 20260724142530123 -> projects/x/state.conflict-mini-20260724142530123.md
+ * the stamp (including milliseconds) disambiguates repeated conflicts on the same
+ * path/device pair so conflict copies never overwrite each other.
  */
 export function conflictPath(relpath: string, device: string, stamp: string): string {
   const dot = relpath.lastIndexOf('.');
@@ -153,7 +153,7 @@ export async function syncOnce(
       // true conflict: last write wins, loser preserved as a timestamped conflict copy;
       // an exact mtime tie deliberately favors local (deterministic, no coin flip)
       const localWins = local[rel].mtimeMs >= entry.mtimeMs;
-      const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+      const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 17);
       if (localWins) {
         const remoteContent = decrypt(key, await backend.getObject(objectKey(key, rel)));
         const copy = conflictPath(rel, entry.modifiedBy, stamp);

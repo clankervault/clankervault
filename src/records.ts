@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import matter from 'gray-matter';
 import type { Confidence, RecordMeta, RecordSource, RecordStatus, RecordType, VaultRecord } from './types.js';
@@ -37,6 +37,9 @@ export function createRecord(vaultDir: string, projectId: string, input: NewReco
     tags: input.tags ?? [],
   };
   const dir = recordsDir(vaultDir, projectId);
+  // a freshly synced device may not have this project's records/ dir yet (an empty
+  // dir never syncs down as a file), so make sure it exists before writing into it
+  mkdirSync(dir, { recursive: true });
   let file = join(dir, `${date}-${slugify(input.title)}.md`);
   for (let n = 2; existsSync(file); n++) file = join(dir, `${date}-${slugify(input.title)}-${n}.md`);
   const body = input.body?.trim() ?? '';

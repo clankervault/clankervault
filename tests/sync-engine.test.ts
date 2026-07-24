@@ -116,7 +116,7 @@ describe('syncOnce: two simulated devices', () => {
 
     expect(rf(stateA, 'utf8')).toContain('mini');       // winner content everywhere
     expect(rf(stateB, 'utf8')).toContain('mini');
-    const conflictNameRe = /^state\.conflict-macbook-\d{14}\.md$/;
+    const conflictNameRe = /^state\.conflict-macbook-\d{17}\.md$/;
     const projDirB = join(B, 'projects', p.id);
     const copyNameB = readdirSync(projDirB).find((n) => conflictNameRe.test(n));
     expect(copyNameB).toBeDefined();                    // loser content preserved, timestamped
@@ -125,6 +125,43 @@ describe('syncOnce: two simulated devices', () => {
     const projDirA = join(A, 'projects', p.id);
     const copyNameA = readdirSync(projDirA).find((n) => conflictNameRe.test(n));
     expect(copyNameA).toBeDefined();
+  });
+
+  it('two conflict rounds back to back both keep their conflict copy (no same-stamp overwrite)', async () => {
+    const remote = tmpDir();
+    const A = newDevice('macbook');
+    const B = newDevice('mini');
+    const backend = () => new DirBackend(remote);
+    const p = createProject(A, 'Demo');
+    await syncOnce(A, backend(), 'pass', 'macbook');
+    await syncOnce(B, backend(), 'pass', 'mini');
+
+    const stateA = join(A, 'projects', p.id, 'state.md');
+    const stateB = join(B, 'projects', p.id, 'state.md');
+    const projDirB = join(B, 'projects', p.id);
+
+    // one full edit-both-sides / sync-both-sides conflict round; B always wins (newer mtime)
+    // so the loser (macbook's edit) is preserved as a timestamped conflict copy each time
+    const conflictRound = async (n: number) => {
+      writeFileSync(stateA, `# State\n\nRound ${n} on macbook.\n`);
+      writeFileSync(stateB, `# State\n\nRound ${n} on mini.\n`);
+      const now = Date.now() / 1000;
+      utimesSync(stateA, now - 60, now - 60);
+      utimesSync(stateB, now, now);
+      await syncOnce(A, backend(), 'pass', 'macbook');            // A pushes its edit
+      const rB = await syncOnce(B, backend(), 'pass', 'mini');    // B sees conflict, B wins
+      expect(rB.conflicts).toContain(`projects/${p.id}/state.md`);
+      await syncOnce(A, backend(), 'pass', 'macbook');            // A pulls the outcome
+    };
+
+    await conflictRound(1);
+    await conflictRound(2);
+
+    // this is the exact data-loss class the ms-stamp fix closes: two conflicts on the
+    // same path/device pair within the same second must not collide on one filename
+    const conflictNameRe = /^state\.conflict-macbook-\d{17}\.md$/;
+    const copies = readdirSync(projDirB).filter((n) => conflictNameRe.test(n));
+    expect(copies.length).toBeGreaterThanOrEqual(2);
   });
 
   it('retries and succeeds through a live concurrent manifest race', async () => {
@@ -136,9 +173,6 @@ describe('syncOnce: two simulated devices', () => {
     await syncOnce(A, new DirBackend(remote), 'pass', 'macbook');
     await syncOnce(B, new DirBackend(remote), 'pass', 'mini');
     await syncOnce(C, new DirBackend(remote), 'pass', 'desktop');
-    // the records dir is empty at this point so it never synced down to C as a file;
-    // createRecord assumes the dir exists (createProject makes it locally on A only)
-    mkdirSync(join(C, 'projects', p.id, 'records'), { recursive: true });
 
     // A queues a local change to push.
     createRecord(A, p.id, { type: 'fact', title: 'Race winner' });
@@ -232,9 +266,9 @@ describe('syncOnce: two simulated devices', () => {
 
 describe('conflictPath', () => {
   it('inserts the device and a timestamp before the extension', () => {
-    expect(conflictPath('projects/x/state.md', 'mini', '20260724142530'))
-      .toBe('projects/x/state.conflict-mini-20260724142530.md');
-    expect(conflictPath('vault.yaml', 'mini', '20260724142530'))
-      .toBe('vault.conflict-mini-20260724142530.yaml');
+    expect(conflictPath('projects/x/state.md', 'mini', '20260724142530123'))
+      .toBe('projects/x/state.conflict-mini-20260724142530123.md');
+    expect(conflictPath('vault.yaml', 'mini', '20260724142530123'))
+      .toBe('vault.conflict-mini-20260724142530123.yaml');
   });
 });

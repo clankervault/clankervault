@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, watch } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { defaultVaultDir, initVault, readConfig, requireVault } from './vault.js';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { defaultVaultDir, initVault, readConfig, readDeviceConfig, requireVault } from './vault.js';
 import { createProject, getProject, listProjects, resolveProjectFromCwd } from './project.js';
 import { createRecord, listRecords, supersedeRecord } from './records.js';
 import { applyBudget, gatherContext } from './compile.js';
 import { adapters, getAdapter } from './adapters/index.js';
+import { DirBackend } from './sync/backend.js';
+import { syncOnce } from './sync/engine.js';
 import type { ProjectInfo, RecordType } from './types.js';
 
 const program = new Command();
@@ -186,6 +189,66 @@ program
     }
     if (ctx.droppedCount) console.log(`(${ctx.droppedCount} records over budget omitted, raise compile.token_budget in vault.yaml if needed)`);
     console.log('Remember: generated files belong in .gitignore.');
+  });
+
+const sync = program.command('sync').description('sync the vault with the configured remote (E2E encrypted)');
+sync
+  .command('setup')
+  .requiredOption('--path <dir>', 'remote directory (mounted cloud folder, NAS, USB)')
+  .option('--passphrase <p>', 'encryption passphrase (or set VAULT_PASSPHRASE)')
+  .action((opts: { path: string; passphrase?: string }) => {
+    const dir = requireVault(vaultDir());
+    const file = join(dir, 'device.yaml');
+    const raw = existsSync(file) ? parseYaml(readFileSync(file, 'utf8')) ?? {} : {};
+    raw.sync = { backend: 'dir', path: resolve(opts.path), ...(opts.passphrase ? { passphrase: opts.passphrase } : {}) };
+    writeFileSync(file, stringifyYaml(raw));
+    console.log(`Sync configured: ${resolve(opts.path)}`);
+    console.log('Use the SAME passphrase on every device. It never leaves your machines.');
+    if (!opts.passphrase) console.log('No passphrase saved: set VAULT_PASSPHRASE before running `vault sync`.');
+  });
+sync
+  .option('--watch', 'keep running and sync on changes')
+  .option('--interval <s>', 'periodic sync interval in watch mode (seconds)', '30')
+  .action(async (opts: { watch?: boolean; interval: string }) => {
+    const dir = requireVault(vaultDir());
+    const device = readDeviceConfig(dir);
+    if (!device.sync) {
+      console.error('Sync is not configured on this device. Run: vault sync setup --path <remoteDir>');
+      process.exit(1);
+    }
+    const passphrase = process.env.VAULT_PASSPHRASE ?? device.sync.passphrase;
+    if (!passphrase) {
+      console.error('No passphrase. Set VAULT_PASSPHRASE or run `vault sync setup` with --passphrase.');
+      process.exit(1);
+    }
+    const backend = new DirBackend(device.sync.path);
+    const runOnce = async () => {
+      const r = await syncOnce(dir, backend, passphrase, device.device);
+      const total = r.uploaded.length + r.downloaded.length + r.deletedLocal.length + r.deletedRemote.length;
+      if (total > 0 || r.conflicts.length > 0 || !opts.watch) {
+        console.log(`synced: ${r.uploaded.length} up, ${r.downloaded.length} down, ${r.conflicts.length} conflicts`);
+      }
+      for (const c of r.conflicts) console.log(`conflict on ${c}: losing version saved next to it as a .conflict-<device> file`);
+    };
+    await runOnce();
+    if (!opts.watch) return;
+    let timer: NodeJS.Timeout | null = null;
+    let running = false;
+    const trigger = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async () => {
+        if (running) return trigger();
+        running = true;
+        try { await runOnce(); } catch (e) { console.error(e instanceof Error ? e.message : String(e)); }
+        running = false;
+      }, 1500);
+    };
+    watch(dir, { recursive: true }, (_event, filename) => {
+      if (filename && (filename.startsWith('.sync') || filename.includes('/.sync'))) return;
+      trigger();
+    });
+    setInterval(trigger, Number(opts.interval) * 1000);
+    console.log(`watching ${dir} (interval ${opts.interval}s), Ctrl+C to stop`);
   });
 
 // expected user errors (no vault yet, vault exists, ...) print one clean line, not a stack trace
