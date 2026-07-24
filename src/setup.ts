@@ -370,7 +370,10 @@ function writeRefreshPlist(home: string, vaultDirPath: string, bin: VaultBin): s
   const dir = join(home, 'Library', 'LaunchAgents');
   mkdirSync(dir, { recursive: true });
   const plistPath = join(dir, 'dev.vault.refresh.plist');
-  const programArgs = [bin.command, ...bin.args, 'compile', '--all']
+  // launchd runs with a minimal PATH, so a `#!/usr/bin/env node` shebang can fail
+  // with exit 127; always invoke the node binary absolutely and hand it the real script
+  const script = bin.args.length ? bin.args[0] : realpathSync(bin.command);
+  const programArgs = [process.execPath, script, 'compile', '--all']
     .map((a) => `        <string>${escapeXml(a)}</string>`)
     .join('\n');
   const xml = `<?xml version="1.0" encoding="UTF-8"?>

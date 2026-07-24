@@ -75,7 +75,10 @@ describe('vault setup wizard', () => {
 
     // refresh daemon plist written (darwin only; this test machine is darwin)
     if (process.platform === 'darwin') {
-      expect(existsSync(join(home, 'Library', 'LaunchAgents', 'dev.vault.refresh.plist'))).toBe(true);
+      const plist = readFileSync(join(home, 'Library', 'LaunchAgents', 'dev.vault.refresh.plist'), 'utf8');
+      // launchd has a minimal PATH: the plist must invoke node absolutely, never rely on a shebang
+      expect(plist).toContain(`<string>${process.execPath}</string>`);
+      expect(plist).not.toMatch(/<string>[^<]*\/vault<\/string>/);
     }
   });
 
