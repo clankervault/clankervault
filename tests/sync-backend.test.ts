@@ -34,4 +34,10 @@ describe('DirBackend', () => {
     await expect(b.putManifest(Buffer.from('stale'), v1)).rejects.toThrow(VersionConflictError);
     expect((await b.getManifest())!.version).toBe(v2);
   });
+
+  it('rejects a path-traversal object key', async () => {
+    const b = new DirBackend(tmpDir());
+    await b.ensure();
+    await expect(b.putObject('../evil', Buffer.from('x'))).rejects.toThrow(/invalid object key/);
+  });
 });

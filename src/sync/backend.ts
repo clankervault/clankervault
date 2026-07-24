@@ -3,7 +3,16 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 export class VersionConflictError extends Error {
-  constructor() { super('sync: remote manifest changed underneath us'); }
+  constructor() {
+    super('sync: remote manifest changed underneath us');
+    this.name = 'VersionConflictError';
+  }
+}
+
+const OBJECT_KEY_RE = /^[0-9a-f]{64}$/;
+
+function checkObjectKey(key: string): void {
+  if (!OBJECT_KEY_RE.test(key)) throw new Error('backend: invalid object key');
 }
 
 /** storage abstraction; v1 ships DirBackend, cloud backends implement the same surface */
@@ -33,34 +42,39 @@ export class DirBackend implements Backend {
   }
 
   async getManifest(): Promise<{ data: Buffer; version: string } | null> {
-    const f = this.p('manifest.bin');
+    const f = this.p('manifest.json');
     if (!existsSync(f)) return null;
-    return { data: readFileSync(f), version: readFileSync(this.p('manifest.version'), 'utf8') };
+    const parsed = JSON.parse(readFileSync(f, 'utf8')) as { version: string; payload: string };
+    return { data: Buffer.from(parsed.payload, 'base64'), version: parsed.version };
   }
 
   async putManifest(data: Buffer, expectedVersion: string | null): Promise<string> {
-    const vf = this.p('manifest.version');
-    const current = existsSync(vf) ? readFileSync(vf, 'utf8') : null;
+    const f = this.p('manifest.json');
+    const current = existsSync(f)
+      ? (JSON.parse(readFileSync(f, 'utf8')) as { version: string }).version
+      : null;
     if (current !== expectedVersion) throw new VersionConflictError();
     const next = `${Date.now()}-${randomBytes(4).toString('hex')}`;
-    const tmp = this.p('manifest.bin.tmp');
-    writeFileSync(tmp, data);
-    renameSync(tmp, this.p('manifest.bin'));
-    writeFileSync(vf, next);
+    const tmp = this.p('manifest.json.tmp');
+    writeFileSync(tmp, JSON.stringify({ version: next, payload: data.toString('base64') }));
+    renameSync(tmp, f);
     return next;
   }
 
   async getObject(key: string): Promise<Buffer> {
+    checkObjectKey(key);
     return readFileSync(this.p('objects', key));
   }
 
   async putObject(key: string, data: Buffer): Promise<void> {
+    checkObjectKey(key);
     const tmp = this.p('objects', `${key}.tmp`);
     writeFileSync(tmp, data);
     renameSync(tmp, this.p('objects', key));
   }
 
   async deleteObject(key: string): Promise<void> {
+    checkObjectKey(key);
     rmSync(this.p('objects', key), { force: true });
   }
 }
