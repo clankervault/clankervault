@@ -10,6 +10,7 @@ import { searchRecords } from './search.js';
 import { applyBudget, gatherContext } from './compile.js';
 import { adapters, getAdapter } from './adapters/index.js';
 import { logAccess } from './log.js';
+import { runMcp } from './mcp.js';
 import { DirBackend } from './sync/backend.js';
 import { isExcluded, syncOnce } from './sync/engine.js';
 import type { ProjectInfo, RecordType } from './types.js';
@@ -210,6 +211,18 @@ program
     if (ctx.droppedCount) console.log(`(${ctx.droppedCount} records over budget omitted, raise compile.token_budget in vault.yaml if needed)`);
     logAccess(dir, 'compile', { project: p.id, tools: opts.tool });
     console.log('Remember: generated files belong in .gitignore.');
+  });
+
+program
+  .command('mcp')
+  .description('run the vault as an MCP server on stdio (connect from Claude Desktop, Claude Code, etc.)')
+  .action(async () => {
+    try {
+      await runMcp(requireVault(vaultDir()));
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
   });
 
 const sync = program.command('sync').description('sync the vault with the configured remote (E2E encrypted)');
