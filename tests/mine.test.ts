@@ -27,6 +27,23 @@ describe('parseCandidates', () => {
     ]);
     expect(parseCandidates(raw)).toHaveLength(1);
   });
+  it('is not shadowed by arrays nested inside candidates (tags)', () => {
+    const raw = JSON.stringify([
+      {
+        type: 'recipe', title: 'Export shorts', body: 'ffmpeg -crf 18',
+        tags: ['ffmpeg', 'shorts'], confidence: 'high',
+      },
+    ]);
+    const c = parseCandidates(raw);
+    expect(c).toHaveLength(1);
+    expect(c[0].tags).toEqual(['ffmpeg', 'shorts']);
+  });
+  it('still prefers the real trailing array over an earlier prose example', () => {
+    const raw = 'an empty result would be [] but here: ' + JSON.stringify([
+      { type: 'fact', title: 'Real', body: '', tags: ['a'], confidence: 'high' },
+    ]);
+    expect(parseCandidates(raw).map((c) => c.title)).toEqual(['Real']);
+  });
   it('returns empty on garbage or missing array', () => {
     expect(parseCandidates('no json here')).toEqual([]);
     expect(parseCandidates('{"not":"array"}')).toEqual([]);

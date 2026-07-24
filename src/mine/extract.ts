@@ -29,12 +29,13 @@ const CONFIDENCES = new Set(['high', 'medium', 'low']);
  * Scan raw for a top-level JSON array, tracking bracket depth and JSON string state
  * (so brackets inside quoted strings, including escaped quotes, do not confuse the scan).
  * Prose can mention brackets before the real payload (a markdown `[]` example, a range
- * like "[1-5]"), so every '[' in the text is tried and the LAST span that actually
- * parses to a JSON array wins, since the model's real output comes last.
+ * like "[1-5]"), so candidate spans are tried left to right and the LAST MAXIMAL span
+ * that parses to a JSON array wins. After a span parses, scanning resumes AFTER it:
+ * arrays nested inside a candidate (its "tags" field) must never shadow the outer array.
  */
 function extractJsonArray(raw: string): string | null {
   let last: string | null = null;
-  for (let start = raw.indexOf('['); start >= 0; start = raw.indexOf('[', start + 1)) {
+  for (let start = raw.indexOf('['); start >= 0; ) {
     let depth = 0;
     let inString = false;
     let escaped = false;
@@ -54,11 +55,15 @@ function extractJsonArray(raw: string): string | null {
         if (depth === 0) { end = j; break; }
       }
     }
-    if (end < 0) continue;                // unbalanced from this '[': try the next one
+    if (end < 0) { start = raw.indexOf('[', start + 1); continue; }   // unbalanced: try the next '['
     const span = raw.slice(start, end + 1);
+    let parsed = false;
     try {
-      if (Array.isArray(JSON.parse(span))) last = span;
-    } catch { /* not valid JSON at this position: try the next '[' */ }
+      if (Array.isArray(JSON.parse(span))) { last = span; parsed = true; }
+    } catch { /* not valid JSON at this position */ }
+    // a parsed span is consumed whole so its nested arrays cannot shadow it;
+    // an unparsable span may still contain the real array, so step just one '[' forward
+    start = parsed ? raw.indexOf('[', end + 1) : raw.indexOf('[', start + 1);
   }
   return last;
 }
