@@ -51,9 +51,9 @@ below), and only take effect once a human confirms them.
 
 ## Install
 
-This is phase 1, unreleased software: the package is not on the npm registry
-yet, and the name `vault-cli` is already taken by an unrelated project there,
-so it will need a different published name before `npm install -g` works
+This is unreleased software: the package is not on the npm registry yet, and
+the name `vault-cli` is already taken by an unrelated project there, so it
+will need a different published name before `npm install -g <name>` works
 as-is. For now, install from source:
 
 ```bash
@@ -70,6 +70,41 @@ through), e.g. `npm run dev -- init ~/vault`.
 ## Quickstart
 
 ```bash
+vault setup
+```
+
+That single command is the intended way to start using vault. It looks at
+this machine, tells you what it found, and asks before it touches anything
+(pass `--yes` to accept every default without prompting, or `--dry-run` to
+see the plan without changing a thing). One run:
+
+1. Creates `~/vault` if you do not have one yet (override with `VAULT_DIR` or
+   `--vault`).
+2. Detects which AI tools are installed: Claude Code, Codex, Cursor, Gemini
+   CLI, Claude Desktop, Windsurf, by looking for each tool's own config
+   directory. Nothing here assumes Claude Code is the only tool in play.
+3. Discovers your projects by reading the `cwd` field out of session
+   transcripts these tools already keep on disk (Claude Code's
+   `~/.claude/projects/`, and Codex's `~/.codex/sessions/`, which also
+   carries `cwd` per session). It never guesses a project from an encoded
+   directory name, only from what a real transcript says its working
+   directory was, and it registers each one it finds (skipping anything that
+   does not exist on disk anymore, or that a project already covers).
+4. Wires each detected tool to serve compiled context natively (see the
+   per-tool table below), and prints the one manual step or two that need a
+   human hand (a `claude mcp add` command, a Codex TOML snippet), because
+   those need a CLI session or a config format vault will not silently edit.
+5. Fast-forwards `vault mine`'s offsets so mining starts from now rather than
+   trying to read months of transcript history on its first run.
+6. Offers the free local refresh daemon and prints how to turn on the paid
+   mining daemon (see Daemons below).
+7. Compiles the vault into every adapter the detected tools need, for every
+   project it just registered.
+
+If you would rather do it by hand, the pieces `vault setup` wires together
+are the same commands used everywhere else in this README:
+
+```bash
 vault init                                    # creates ~/vault
 vault project new "My App" --root ~/dev/my-app
 cd ~/dev/my-app
@@ -81,6 +116,42 @@ vault compile                                 # writes CLAUDE.md, AGENTS.md, .cu
 to target elsewhere) and always stamps a `GENERATED` header, because these
 files are disposable views of the vault, not the source of truth. Add them to
 your project's `.gitignore`; the vault itself is what you keep.
+`vault compile --all` does the same for every registered project at once,
+into the first existing path root each one has, and is what both `vault
+setup` and the refresh daemon call underneath.
+
+### Per-tool behavior
+
+| Tool | Detected by | What `vault setup` does |
+|------|-------------|--------------------------|
+| Claude Code | `~/.claude` exists | Compiles `CLAUDE.md` into each project. Adds a `SessionStart` hook to `~/.claude/settings.json` that reruns `vault compile --tool claude` at the start of every session, so the file never goes stale. Prints `claude mcp add vault -- vault mcp` for you to run yourself (it needs the `claude` CLI and your own login, so vault never runs it for you). |
+| Codex | `~/.codex` exists | Compiles `AGENTS.md` into each project. Codex config is TOML, which vault never edits; instead it prints a ready-to-paste `[mcp_servers.vault]` snippet for `~/.codex/config.toml`. |
+| Cursor | `~/.cursor` exists | Compiles `.cursorrules` into each project. Merges `mcpServers.vault` into `~/.cursor/mcp.json`, creating the file if it does not exist and preserving every other key already in it. |
+| Gemini CLI | `~/.gemini` exists | Compiles `GEMINI.md` into each project (Gemini CLI reads this file natively; no MCP wiring yet). |
+| Claude Desktop | `~/Library/Application Support/Claude` exists | Compiles `CLAUDE.md` (same adapter as Claude Code). Merges `mcpServers.vault` into `claude_desktop_config.json`, same idempotent merge as Cursor. |
+| Windsurf | `~/.windsurf` exists | Compiles `.windsurfrules` into each project. |
+
+Every config file `vault setup` edits is read, merged and written back with
+every other key preserved, and gets a one-time `<file>.bak-vault` copy of
+what was there before the first edit. Re-running `vault setup` is safe: it
+never adds a duplicate hook entry and never re-registers a project it
+already knows about.
+
+### Daemons
+
+`vault setup` can install two background jobs, and treats them very
+differently because one is free and one costs money:
+
+- **Refresh daemon** (`dev.vault.refresh`, macOS launchd, hourly): runs
+  `vault compile --all`. This is a purely local operation, no network calls,
+  so `vault setup` may install and load it automatically once you say yes.
+  On non-macOS it prints an equivalent cron line instead of writing a plist.
+- **Mining daemon**: runs `vault mine`, which shells out to the `claude` CLI
+  to read new session transcripts, so it costs whatever that CLI call costs
+  against your own account. `vault setup` never turns this on for you; it
+  only fast-forwards the mining offsets (so a future run starts from "now",
+  not from months of history) and prints the `launchctl load` line you would
+  run yourself to enable it on a schedule.
 
 ## Append-only and supersede
 
@@ -159,9 +230,12 @@ interface Adapter {
 
 `src/adapters/index.ts` holds the registry (`adapters`, `getAdapter`) and a
 shared `renderMarkdownBody` helper used by the markdown-flavored targets.
-Shipped today: `claude` (`CLAUDE.md`), `agents` (`AGENTS.md`) and `cursor`
-(`.cursorrules`). Adding a new tool means writing one more adapter file and
-registering it, nothing else in the CLI or compiler needs to change.
+Shipped today: `claude` (`CLAUDE.md`), `agents` (`AGENTS.md`), `cursor`
+(`.cursorrules`), `gemini` (`GEMINI.md`) and `windsurf` (`.windsurfrules`).
+`TOOL_ADAPTERS` maps each detected AI tool to the adapter it needs (used by
+`vault setup`; see the per-tool table above). Adding a new tool means writing
+one more adapter file and registering it, nothing else in the CLI or
+compiler needs to change.
 
 ## Sync
 
@@ -408,9 +482,11 @@ phase 4 (mining) and phase 5 (the self-hostable server: HTTP sync remote plus
 remote MCP endpoint, see Self-hosting above) are implemented and tested.
 Still out of scope, and coming later:
 
-- **More mining readers**: Codex session logs, Cursor, best-effort, meant to
-  slot in behind the same reader/extractor interfaces without changing
-  `vault mine` or the CLI.
+- **More mining readers**: `vault setup` already reads `cwd` out of Codex
+  session logs to discover and register projects, but `vault mine` itself
+  still only extracts records from Claude Code transcripts. A Codex reader,
+  and eventually Cursor, best-effort, is meant to slot in behind the same
+  reader/extractor interfaces without changing `vault mine` or the CLI.
 - **Hosted, multi-tenant service**: someone else's `vault serve` running
   your vault for you, with accounts, billing and TLS handled for you. The
   server code for that already exists and is self-hostable today; only the
