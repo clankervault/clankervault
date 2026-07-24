@@ -204,13 +204,15 @@ instead of one large sync later.
 
 **Conflict semantics.** The four append-only record kinds merge for free:
 each record is its own file with a generated name, so two devices adding
-records never collide. `state.md` is the one mutable file, and mutable files
-can genuinely conflict when both devices change the same path since the
-last sync: `vault sync` resolves that with last-write-wins by modification
-time, and the losing version is never silently discarded. It is written
-next to the file it lost to as a timestamped `<name>.conflict-<device>-<stamp>.md`
-copy, which also syncs to every other device, so you can always go read what
-the other side had and recover it by hand if last-write-wins picked wrong.
+records under `records/` never collide. A true conflict can only happen on
+a file you hand-edit directly and that keeps the same path across devices,
+`state.md`, `me/profile.md`, a project's `project.md`, or `vault.yaml`,
+when both devices change it since the last sync. `vault sync` resolves that
+with last-write-wins by modification time, and the losing version is never
+silently discarded: it is written next to the file it lost to as a
+timestamped `<name>.conflict-<device>-<stamp>.md` copy, which also syncs to
+every other device, so you can always go read what the other side had and
+recover it by hand if last-write-wins picked wrong.
 
 **Never synced**, by design, spec §7: `device.yaml` (per-device settings:
 device name, anchors, project root map, sync config itself), `.sync/`

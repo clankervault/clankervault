@@ -9,8 +9,17 @@ import { createRecord, listRecords, supersedeRecord } from './records.js';
 import { applyBudget, gatherContext } from './compile.js';
 import { adapters, getAdapter } from './adapters/index.js';
 import { DirBackend } from './sync/backend.js';
-import { syncOnce } from './sync/engine.js';
+import { isExcluded, syncOnce } from './sync/engine.js';
 import type { ProjectInfo, RecordType } from './types.js';
+
+/** wrong-passphrase decryption failures surface as a raw AES-GCM error; give a human reason instead */
+function friendlySyncError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes('Unsupported state') || msg.includes('unable to authenticate')) {
+    return 'Sync failed to decrypt the remote. Wrong passphrase for this remote?';
+  }
+  return msg;
+}
 
 const program = new Command();
 program
@@ -200,55 +209,71 @@ sync
     const dir = requireVault(vaultDir());
     const file = join(dir, 'device.yaml');
     const raw = existsSync(file) ? parseYaml(readFileSync(file, 'utf8')) ?? {} : {};
-    raw.sync = { backend: 'dir', path: resolve(opts.path), ...(opts.passphrase ? { passphrase: opts.passphrase } : {}) };
+    // merge, do not clobber: rerunning setup to change --path (or move to a new remote)
+    // must not silently drop a passphrase saved on a previous run
+    const existing = raw.sync && typeof raw.sync === 'object' ? raw.sync : {};
+    raw.sync = {
+      backend: 'dir',
+      path: resolve(opts.path),
+      ...(opts.passphrase ? { passphrase: opts.passphrase } : existing.passphrase ? { passphrase: existing.passphrase } : {}),
+    };
     writeFileSync(file, stringifyYaml(raw));
     console.log(`Sync configured: ${resolve(opts.path)}`);
     console.log('Use the SAME passphrase on every device. It never leaves your machines.');
-    if (!opts.passphrase) console.log('No passphrase saved: set VAULT_PASSPHRASE before running `vault sync`.');
+    if (!raw.sync.passphrase) console.log('No passphrase saved: set VAULT_PASSPHRASE before running `vault sync`.');
   });
 sync
   .option('--watch', 'keep running and sync on changes')
   .option('--interval <s>', 'periodic sync interval in watch mode (seconds)', '30')
   .action(async (opts: { watch?: boolean; interval: string }) => {
-    const dir = requireVault(vaultDir());
-    const device = readDeviceConfig(dir);
-    if (!device.sync) {
-      console.error('Sync is not configured on this device. Run: vault sync setup --path <remoteDir>');
-      process.exit(1);
-    }
-    const passphrase = process.env.VAULT_PASSPHRASE ?? device.sync.passphrase;
-    if (!passphrase) {
-      console.error('No passphrase. Set VAULT_PASSPHRASE or run `vault sync setup` with --passphrase.');
-      process.exit(1);
-    }
-    const backend = new DirBackend(device.sync.path);
-    const runOnce = async () => {
-      const r = await syncOnce(dir, backend, passphrase, device.device);
-      const total = r.uploaded.length + r.downloaded.length + r.deletedLocal.length + r.deletedRemote.length;
-      if (total > 0 || r.conflicts.length > 0 || !opts.watch) {
-        console.log(`synced: ${r.uploaded.length} up, ${r.downloaded.length} down, ${r.conflicts.length} conflicts`);
+    // commander does not await an async action, so an uncaught rejection here would
+    // escape the top-level try/catch entirely (unhandled rejection, ugly stack trace,
+    // and no guaranteed exit code) - catch everything in this action ourselves instead
+    try {
+      const dir = requireVault(vaultDir());
+      const device = readDeviceConfig(dir);
+      if (!device.sync) {
+        console.error('Sync is not configured on this device. Run: vault sync setup --path <remoteDir>');
+        process.exit(1);
       }
-      for (const c of r.conflicts) console.log(`conflict on ${c}: losing version saved next to it as a .conflict-<device> file`);
-    };
-    await runOnce();
-    if (!opts.watch) return;
-    let timer: NodeJS.Timeout | null = null;
-    let running = false;
-    const trigger = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(async () => {
-        if (running) return trigger();
-        running = true;
-        try { await runOnce(); } catch (e) { console.error(e instanceof Error ? e.message : String(e)); }
-        running = false;
-      }, 1500);
-    };
-    watch(dir, { recursive: true }, (_event, filename) => {
-      if (filename && (filename.startsWith('.sync') || filename.includes('/.sync'))) return;
-      trigger();
-    });
-    setInterval(trigger, Number(opts.interval) * 1000);
-    console.log(`watching ${dir} (interval ${opts.interval}s), Ctrl+C to stop`);
+      const passphrase = process.env.VAULT_PASSPHRASE ?? device.sync.passphrase;
+      if (!passphrase) {
+        console.error('No passphrase. Set VAULT_PASSPHRASE or run `vault sync setup` with --passphrase.');
+        process.exit(1);
+      }
+      const backend = new DirBackend(device.sync.path);
+      const runOnce = async () => {
+        const r = await syncOnce(dir, backend, passphrase, device.device);
+        const total = r.uploaded.length + r.downloaded.length + r.deletedLocal.length + r.deletedRemote.length;
+        if (total > 0 || r.conflicts.length > 0 || !opts.watch) {
+          console.log(`synced: ${r.uploaded.length} up, ${r.downloaded.length} down, ${r.conflicts.length} conflicts`);
+        }
+        for (const c of r.conflicts) console.log(`conflict on ${c}: losing version saved next to it as a .conflict-<device> file`);
+      };
+      await runOnce();
+      if (!opts.watch) return;
+      let timer: NodeJS.Timeout | null = null;
+      let running = false;
+      const trigger = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(async () => {
+          if (running) return trigger();
+          running = true;
+          try { await runOnce(); } catch (e) { console.error(friendlySyncError(e)); }
+          running = false;
+        }, 1500);
+      };
+      // same per-device exclusions as the sync engine itself (device.yaml, .sync/, .mine/, .DS_Store)
+      watch(dir, { recursive: true }, (_event, filename) => {
+        if (filename && isExcluded(filename)) return;
+        trigger();
+      });
+      setInterval(trigger, Number(opts.interval) * 1000);
+      console.log(`watching ${dir} (interval ${opts.interval}s), Ctrl+C to stop`);
+    } catch (err) {
+      console.error(friendlySyncError(err));
+      process.exit(1);
+    }
   });
 
 // expected user errors (no vault yet, vault exists, ...) print one clean line, not a stack trace
