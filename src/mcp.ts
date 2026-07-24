@@ -103,7 +103,7 @@ export function buildServer(vaultDir: string): McpServer {
     {
       project: z.string().optional(),
       type: z.enum(['fact', 'recipe', 'decision', 'taste']),
-      title: z.string(),
+      title: z.string().min(1),
       body: z.string().optional(),
       scope: z.string().optional(),
       tags: z.array(z.string()).optional(),
@@ -132,7 +132,11 @@ export function buildServer(vaultDir: string): McpServer {
     { query: z.string() },
     async ({ query }) => {
       logAccess(vaultDir, 'mcp:search', { query });
-      const hits = searchRecords(vaultDir, query);
+      // mirror the compiler's trust gate (gatherContext): a record written via MCP and
+      // not yet confirmed by a human must not surface back to an assistant through search
+      const hits = searchRecords(vaultDir, query).filter(
+        (h) => !(h.record.meta.status === 'unconfirmed' && h.record.meta.source?.tool?.startsWith('mcp')),
+      );
       if (!hits.length) return text('No matches.');
       return text(hits.map((h) => `${h.projectId}  ${h.record.meta.id}  ${h.record.title}`).join('\n'));
     },

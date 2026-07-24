@@ -10,6 +10,11 @@ let proc: ChildProcess;
 let buf = '';
 const pending = new Map<number, (msg: any) => void>();
 let nextId = 1;
+let rememberedId: string;
+
+function cli(args: string[], cwd?: string) {
+  return spawnSync('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), ...args], { encoding: 'utf8', cwd });
+}
 
 function rpc(method: string, params?: unknown): Promise<any> {
   const id = nextId++;
@@ -27,8 +32,6 @@ function notify(method: string, params?: unknown): void {
 beforeAll(async () => {
   vault = join(tmpDir(), 'v');
   work = tmpDir();
-  const cli = (args: string[], cwd?: string) =>
-    spawnSync('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), ...args], { encoding: 'utf8', cwd });
   cli(['init', vault]);
   cli(['--vault', vault, 'project', 'new', 'Demo', '--root', work]);
   cli(['--vault', vault, 'add', 'fact', 'Deploy on Vercel', '-b', 'branch main'], work);
@@ -86,6 +89,7 @@ describe('vault mcp', () => {
     const msg = res.result.content[0].text;
     expect(msg).toMatch(/unconfirmed/);
     expect(msg).toMatch(/vault confirm/);
+    rememberedId = msg.match(/Saved (\S+) as unconfirmed/)![1];
     const recDir = readdirSync(join(vault, 'projects')).find((d) => d.startsWith('demo'))!;
     const files = readdirSync(join(vault, 'projects', recDir, 'records'));
     const remembered = files.find((f) => f.includes('export-shorts'))!;
@@ -102,6 +106,17 @@ describe('vault mcp', () => {
   it('search finds records across the vault', async () => {
     const res = await rpc('tools/call', { name: 'search', arguments: { query: 'vercel' } });
     expect(res.result.content[0].text).toContain('Deploy on Vercel');
+  });
+
+  it('unconfirmed MCP records are gated out of search until confirmed', async () => {
+    const before = await rpc('tools/call', { name: 'search', arguments: { query: 'export shorts' } });
+    expect(before.result.content[0].text).not.toContain('Export shorts');
+
+    const confirmed = cli(['--vault', vault, 'confirm', rememberedId, '--project', 'demo']);
+    expect(confirmed.status).toBe(0);
+
+    const after = await rpc('tools/call', { name: 'search', arguments: { query: 'export shorts' } });
+    expect(after.result.content[0].text).toContain('Export shorts');
   });
 
   it('get_state answers for a known project and guides for unknown', async () => {
