@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import { chmodSync, existsSync, readFileSync, writeFileSync, watch } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { AddressInfo } from 'node:net';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { defaultVaultDir, initVault, readConfig, readDeviceConfig, requireVault } from './vault.js';
 import { createProject, getProject, listProjects, resolveProjectFromCwd } from './project.js';
@@ -13,6 +14,7 @@ import { logAccess } from './log.js';
 import { runMcp } from './mcp.js';
 import { DirBackend } from './sync/backend.js';
 import { isExcluded, syncOnce } from './sync/engine.js';
+import { createVaultServer, resolveServerToken } from './server/http.js';
 import { ClaudeCliExtractor } from './mine/extract.js';
 import { mineOnce, settleRecords } from './mine/mine.js';
 import type { ProjectInfo, RecordType } from './types.js';
@@ -352,6 +354,31 @@ sync
       console.log(`watching ${dir} (interval ${opts.interval}s), Ctrl+C to stop`);
     } catch (err) {
       console.error(friendlySyncError(err));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('serve')
+  .requiredOption('--data <dir>', 'server data directory (ciphertext store, token, replica)')
+  .option('--port <n>', 'port to listen on', '8484')
+  .option('--token <t>', 'bearer token (default: VAULT_SERVER_TOKEN env or <data>/token file)')
+  .description('run the self-hostable vault server (encrypted sync remote + remote MCP)')
+  .action((opts: { data: string; port: string; token?: string }) => {
+    try {
+      const port = Number(opts.port);
+      // port 0 is valid and means "let the OS assign one" - the real port is read back
+      // from server.address() in the listen callback below, not from this parsed value
+      if (!Number.isFinite(port) || port < 0) { console.error(`Invalid --port "${opts.port}"`); process.exit(1); }
+      const { token, generated } = resolveServerToken(resolve(opts.data), opts.token);
+      if (generated) console.log(`Generated token (share with your devices, shown once): ${token}`);
+      const server = createVaultServer({ dataDir: resolve(opts.data), token, passphrase: process.env.VAULT_PASSPHRASE });
+      server.listen(port, () => {
+        const real = (server.address() as AddressInfo).port;
+        console.log(`vault server listening on :${real} (sync API ready)`);
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
   });
