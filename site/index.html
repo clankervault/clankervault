@@ -210,13 +210,14 @@
 
 <header>
   <div class="wrap">
-    <div class="kicker rise d1">Portable memory for AI tools · Open source · MIT</div>
-    <h1 class="rise d2">One memory.<br>All your <em>clankers</em>.</h1>
+    <div class="kicker rise d1">Open source CLI · MIT · plain markdown</div>
+    <h1 class="rise d2">Your AI tools,<br>sharing <em>one memory</em>.</h1>
     <p class="hero-sub rise d3">
-      Every AI tool knows you differently today - and most don't know you at all.
-      Clankervault is one folder of plain markdown that all of them read:
-      who you are, how you work, what you decided and why. On every machine,
-      in every account, the same.
+      Clankervault is a command line tool. You keep notes about yourself and your
+      projects in one folder of plain markdown, and it generates the context files
+      your AI tools already read: CLAUDE.md for Claude Code, AGENTS.md for Codex,
+      .cursorrules for Cursor, GEMINI.md for Gemini, plus an MCP server for chat
+      apps. Update the folder once, every tool gets it.
     </p>
     <div class="hero-cta rise d4">
       <button class="install" onclick="copyInstall(this)"><span class="dollar">$</span> npm i -g clankervault &amp;&amp; clanker setup</button>
@@ -251,12 +252,14 @@
 
 <section id="how">
   <div class="wrap">
-    <div class="sec-label">The mechanic</div>
-    <h2>A vault is the database. Their context files are just views.</h2>
+    <div class="sec-label">What it does</div>
+    <h2>You keep one folder. It generates the files each tool reads.</h2>
     <p class="sec-sub">
-      You keep one readable folder. <code>clanker compile</code> renders it into the
-      native file each tool already loads automatically - so your agents don't need
-      to learn anything. They just wake up knowing you.
+      The vault holds one markdown file per thing worth remembering: a fact about a
+      project, a proven how-to, a decision and its reason, a preference.
+      <code>clanker compile</code> condenses them into the context file each tool
+      auto-loads at start. Those generated files are disposable views; the folder is
+      the source of truth.
     </p>
 
     <div class="flow">
@@ -267,7 +270,7 @@
 │   ├── profile.md
 │   └── taste/
 └── projects/
-    └── cettra/
+    └── shop-api/
         ├── project.md
         ├── records/
         │   └── ...one file
@@ -289,26 +292,27 @@
 
 <section style="padding-top: 0;">
   <div class="wrap">
-    <div class="sec-label">Setup is one command</div>
-    <h2>It finds your tools and your projects by itself.</h2>
+    <div class="sec-label">Setup</div>
+    <h2>One command wires everything.</h2>
     <p class="sec-sub">
-      <code>clanker setup</code> detects what's installed, discovers your projects
-      from real session transcripts, wires the hooks and MCP configs, and compiles
-      everything. Real output from a real machine:
+      <code>clanker setup</code> looks at which AI tools you have installed, reads
+      your existing session transcripts to find the projects you actually work in,
+      registers them, installs a hook so the files stay fresh, and compiles. From
+      then on it runs itself.
     </p>
     <div class="card term">
       <div class="card-head">clanker setup <span class="dot"></span></div>
       <pre><span class="t-cmd">$ clanker setup</span>
 Detected tools: claude-code, codex, cursor, gemini, claude-desktop
-Registered project cettra (/Users/you/Development/cettra-eshop)
-Registered project verdikt (/Users/you/Development/verdikt-apps)
+Registered project shop-api (~/Development/shop-api)
+Registered project videos (~/Videos/channel)
 Wired Claude Code SessionStart hook
 Wired Claude Desktop MCP config
 Wired Cursor MCP config
-Fast-forwarded 790 transcript(s); mining starts fresh from here.
-<span class="t-dim">skipped ~/Development/studio/CLAUDE.md: existing file is not
-clankervault-generated (use --force to overwrite)</span>
-Compiled 14 project(s).</pre>
+Fast-forwarded 312 transcript(s); mining starts fresh from here.
+<span class="t-dim">skipped ~/Development/legacy-app/CLAUDE.md: existing file is
+not clankervault-generated (use --force to overwrite)</span>
+Compiled 6 project(s).</pre>
     </div>
     <p class="hero-note">That skipped line is a feature: it never overwrites a context file you wrote by hand.</p>
   </div>
@@ -352,12 +356,13 @@ the platform recompressed it.
 <section class="statement">
   <div class="wrap">
     <div class="sec-label">Mining</div>
-    <h2>And you don't have to write it. <em>Your sessions write it for you.</em></h2>
+    <h2><code style="font-size:0.85em">clanker mine</code> reads your session transcripts and drafts records <em>for you</em>.</h2>
     <p class="sec-sub">
-      <code>clanker mine</code> distills decisions, recipes and work-in-progress out of
-      your AI session transcripts - starting with Claude Code, more tools on the way.
-      Everything mined lands as a pending record: nothing settles into your memory
-      without your say.
+      It scans what changed in your AI sessions since last time (Claude Code first,
+      more tools coming), pulls out decisions, recipes and work-in-progress, and
+      saves them as pending records with a link back to the exact transcript.
+      Pending means exactly that: nothing enters your compiled context until you
+      confirm it, or until it sits unchallenged long enough to settle.
     </p>
   </div>
 </section>
