@@ -53,7 +53,7 @@ beforeAll(async () => {
     capabilities: {},
     clientInfo: { name: 'test-client', version: '1.0.0' },
   });
-  expect(initResult.result.serverInfo.name).toBe('vault');
+  expect(initResult.result.serverInfo.name).toBe('clankervault');
   notify('notifications/initialized');
 }, 60000);
 
@@ -93,7 +93,7 @@ describe('vault mcp', () => {
     });
     const msg = res.result.content[0].text;
     expect(msg).toMatch(/unconfirmed/);
-    expect(msg).toMatch(/vault confirm/);
+    expect(msg).toMatch(/clanker confirm/);
     rememberedId = msg.match(/Saved (\S+) as unconfirmed/)![1];
     const recDir = readdirSync(join(vault, 'projects')).find((d) => d.startsWith('demo'))!;
     const files = readdirSync(join(vault, 'projects', recDir, 'records'));

@@ -1,13 +1,13 @@
-# vault
+# Clankervault
 
 Wherever you talk to AI, you're talking to someone who knows you.
 
-`vault` is a portable memory layer for AI coding and creative tools. You keep one
-plain markdown vault on disk, in a format you own and can read without any
-tool. `vault compile` turns it into the native context files each assistant
-already looks for: `CLAUDE.md`, `AGENTS.md`, `.cursorrules`. Write your facts,
-recipes, decisions and taste once, and every tool you switch to picks up the
-same memory instead of starting from zero.
+**Clankervault** is a portable memory layer for AI coding and creative tools. You
+keep one plain markdown vault on disk, in a format you own and can read without
+any tool. `clanker compile` turns it into the native context files each
+assistant already looks for: `CLAUDE.md`, `AGENTS.md`, `.cursorrules`. Write your
+facts, recipes, decisions and taste once, and every tool you switch to picks up
+the same memory instead of starting from zero.
 
 ## The five record kinds
 
@@ -25,10 +25,10 @@ overwrite directly, because it tracks what is happening right now.
 
 `fact`, `recipe`, `decision` and `taste` records also carry `status`
 (`unconfirmed`, `confirmed` or `superseded`) and `confidence`
-(`high`, `medium`, `low`). Records written by hand through `vault add` are
+(`high`, `medium`, `low`). Records written by hand through `clanker add` are
 `confirmed`/`high` by default; unconfirmed records come from an assistant
 proposing memory live through the MCP server's `remember` tool, or from
-`vault mine` reading your AI session transcripts (see MCP server and Mining
+`clanker mine` reading your AI session transcripts (see MCP server and Mining
 below), and only take effect once a human confirms them.
 
 ## Vault structure
@@ -51,16 +51,20 @@ below), and only take effect once a human confirms them.
 
 ## Install
 
-This is unreleased software: the package is not on the npm registry yet, and
-the name `vault-cli` is already taken by an unrelated project there, so it
-will need a different published name before `npm install -g <name>` works
-as-is. For now, install from source:
+This is unreleased software: the package is not on the npm registry yet. Once
+published:
 
 ```bash
-git clone <this repo> vault-cli && cd vault-cli
+npm i -g clankervault
+```
+
+For now, install from source:
+
+```bash
+git clone <this repo> clankervault && cd clankervault
 npm install
 npm run build
-npm link          # puts `vault` on your PATH
+npm link          # puts `clanker` on your PATH
 ```
 
 During development you can run the CLI straight from `src/cli.ts` with `tsx`,
@@ -70,11 +74,11 @@ through), e.g. `npm run dev -- init ~/vault`.
 ## Quickstart
 
 ```bash
-vault setup
+clanker setup
 ```
 
-That single command is the intended way to start using vault. It looks at
-this machine, tells you what it found, and asks before it touches anything
+That single command is the intended way to start using Clankervault. It looks
+at this machine, tells you what it found, and asks before it touches anything
 (pass `--yes` to accept every default without prompting, or `--dry-run` to
 see the plan without changing a thing). One run:
 
@@ -93,62 +97,63 @@ see the plan without changing a thing). One run:
 4. Wires each detected tool to serve compiled context natively (see the
    per-tool table below), and prints the one manual step or two that need a
    human hand (a `claude mcp add` command, a Codex TOML snippet), because
-   those need a CLI session or a config format vault will not silently edit.
-5. Fast-forwards `vault mine`'s offsets so mining starts from now rather than
+   those need a CLI session or a config format Clankervault will not silently
+   edit.
+5. Fast-forwards `clanker mine`'s offsets so mining starts from now rather than
    trying to read months of transcript history on its first run.
 6. Offers the free local refresh daemon and prints how to turn on the paid
    mining daemon (see Daemons below).
 7. Compiles the vault into every adapter the detected tools need, for every
    project it just registered.
 
-If you would rather do it by hand, the pieces `vault setup` wires together
+If you would rather do it by hand, the pieces `clanker setup` wires together
 are the same commands used everywhere else in this README:
 
 ```bash
-vault init                                    # creates ~/vault
-vault project new "My App" --root ~/dev/my-app
+clanker init                                    # creates ~/vault
+clanker project new "My App" --root ~/dev/my-app
 cd ~/dev/my-app
-vault add decision "Use Postgres over SQLite" -b "need concurrent writers"
-vault compile                                 # writes CLAUDE.md, AGENTS.md, .cursorrules here
+clanker add decision "Use Postgres over SQLite" -b "need concurrent writers"
+clanker compile                                 # writes CLAUDE.md, AGENTS.md, .cursorrules here
 ```
 
-`vault compile` writes into the current directory by default (`--out <dir>`
+`clanker compile` writes into the current directory by default (`--out <dir>`
 to target elsewhere) and always stamps a `GENERATED` header, because these
 files are disposable views of the vault, not the source of truth. Add them to
 your project's `.gitignore`; the vault itself is what you keep.
-`vault compile --all` does the same for every registered project at once,
-into the first existing path root each one has, and is what both `vault
+`clanker compile --all` does the same for every registered project at once,
+into the first existing path root each one has, and is what both `clanker
 setup` and the refresh daemon call underneath.
 
 ### Per-tool behavior
 
-| Tool | Detected by | What `vault setup` does |
+| Tool | Detected by | What `clanker setup` does |
 |------|-------------|--------------------------|
-| Claude Code | `~/.claude` exists | Compiles `CLAUDE.md` into each project. Adds a `SessionStart` hook to `~/.claude/settings.json` that reruns `vault compile --tool claude` at the start of every session, so the file never goes stale. Prints `claude mcp add vault -- vault mcp` for you to run yourself (it needs the `claude` CLI and your own login, so vault never runs it for you). |
-| Codex | `~/.codex` exists | Compiles `AGENTS.md` into each project. Codex config is TOML, which vault never edits; instead it prints a ready-to-paste `[mcp_servers.vault]` snippet for `~/.codex/config.toml`. |
-| Cursor | `~/.cursor` exists | Compiles `.cursorrules` into each project. Merges `mcpServers.vault` into `~/.cursor/mcp.json`, creating the file if it does not exist and preserving every other key already in it. |
+| Claude Code | `~/.claude` exists | Compiles `CLAUDE.md` into each project. Adds a `SessionStart` hook to `~/.claude/settings.json` that reruns `clanker compile --tool claude` at the start of every session, so the file never goes stale. Prints `claude mcp add clankervault -- clanker mcp` for you to run yourself (it needs the `claude` CLI and your own login, so Clankervault never runs it for you). |
+| Codex | `~/.codex` exists | Compiles `AGENTS.md` into each project. Codex config is TOML, which Clankervault never edits; instead it prints a ready-to-paste `[mcp_servers.clankervault]` snippet for `~/.codex/config.toml`. |
+| Cursor | `~/.cursor` exists | Compiles `.cursorrules` into each project. Merges `mcpServers.clankervault` into `~/.cursor/mcp.json`, creating the file if it does not exist and preserving every other key already in it. |
 | Gemini CLI | `~/.gemini` exists | Compiles `GEMINI.md` into each project (Gemini CLI reads this file natively; no MCP wiring yet). |
-| Claude Desktop | `~/Library/Application Support/Claude` exists | Compiles `CLAUDE.md` (same adapter as Claude Code). Merges `mcpServers.vault` into `claude_desktop_config.json`, same idempotent merge as Cursor. |
+| Claude Desktop | `~/Library/Application Support/Claude` exists | Compiles `CLAUDE.md` (same adapter as Claude Code). Merges `mcpServers.clankervault` into `claude_desktop_config.json`, same idempotent merge as Cursor. |
 | Windsurf | `~/.windsurf` exists | Compiles `.windsurfrules` into each project. |
 
-Every config file `vault setup` edits is read, merged and written back with
+Every config file `clanker setup` edits is read, merged and written back with
 every other key preserved, and gets a one-time `<file>.bak-vault` copy of
-what was there before the first edit. Re-running `vault setup` is safe: it
+what was there before the first edit. Re-running `clanker setup` is safe: it
 never adds a duplicate hook entry and never re-registers a project it
 already knows about.
 
 ### Daemons
 
-`vault setup` can install two background jobs, and treats them very
+`clanker setup` can install two background jobs, and treats them very
 differently because one is free and one costs money:
 
-- **Refresh daemon** (`dev.vault.refresh`, macOS launchd, hourly): runs
-  `vault compile --all`. This is a purely local operation, no network calls,
-  so `vault setup` may install and load it automatically once you say yes.
+- **Refresh daemon** (`dev.clankervault.refresh`, macOS launchd, hourly): runs
+  `clanker compile --all`. This is a purely local operation, no network calls,
+  so `clanker setup` may install and load it automatically once you say yes.
   On non-macOS it prints an equivalent cron line instead of writing a plist.
-- **Mining daemon**: runs `vault mine`, which shells out to the `claude` CLI
+- **Mining daemon**: runs `clanker mine`, which shells out to the `claude` CLI
   to read new session transcripts, so it costs whatever that CLI call costs
-  against your own account. `vault setup` never turns this on for you; it
+  against your own account. `clanker setup` never turns this on for you; it
   only fast-forwards the mining offsets (so a future run starts from "now",
   not from months of history) and prints the `launchctl load` line you would
   run yourself to enable it on a schedule.
@@ -156,20 +161,20 @@ differently because one is free and one costs money:
 ## Append-only and supersede
 
 Records are never edited in place. When you change your mind, you run
-`vault supersede <old-id> "<new title>"`: it writes a brand new record, links
+`clanker supersede <old-id> "<new title>"`: it writes a brand new record, links
 it back with `supersedes`, and flips the old record's `status` to
 `superseded` and `superseded_by` to the new id. The old body is left
 untouched, so the history of what you used to believe, and when it changed,
 stays on disk. Superseded records are skipped at compile time.
 
-`state.md` is the deliberate exception: `vault state "<text>"` overwrites it
+`state.md` is the deliberate exception: `clanker state "<text>"` overwrites it
 directly, because "what I'm doing right now" is not something worth
 version-history for, it just needs to be current.
 
 ## Project identity
 
 A project is identified by a stable generated id (`<slug>-<4 hex chars>`,
-e.g. `my-app-a1b2`), and `vault` resolves which project you mean from your
+e.g. `my-app-a1b2`), and `clanker` resolves which project you mean from your
 current directory through, in order:
 
 1. a `.vault-id` file (containing just the project id) anywhere from your cwd
@@ -179,7 +184,7 @@ current directory through, in order:
 4. a path prefix match against the project's recorded `roots`
 
 Pass `--project <id-or-name>` to any command to skip resolution entirely.
-`--root` and `--git` on `vault project new` are how you record roots; they
+`--root` and `--git` on `clanker project new` are how you record roots; they
 are repeatable flags, so a project can be recognized from more than one
 checkout or remote.
 
@@ -195,13 +200,13 @@ machine (an external drive, a NAS mount, and so on).
 This is also why a record can carry `availability` frontmatter: a per-device
 map of where an asset actually sits, or `null` if it is confirmed absent
 there. At compile time this renders as a contextual note, e.g. "NOT on this
-device (mini); macbook: /path, nas: /path". The vault never syncs the assets
-themselves, it syncs knowledge about them: where they are, and where they
-are not, on whichever device you are compiling from.
+device (mini); macbook: /path, nas: /path". Clankervault never syncs the
+assets themselves, it syncs knowledge about them: where they are, and where
+they are not, on whichever device you are compiling from.
 
 ## Token budget and priorities
 
-`vault compile` condenses every record to one line (title, first meaningful
+`clanker compile` condenses every record to one line (title, first meaningful
 body line, id reference) and fits as many as it can into `compile.token_budget`
 from `vault.yaml` (default 4000, override per run with `--budget`). Project
 identity, your profile, `state.md`, global taste and unconfirmed-but-high-confidence
@@ -233,20 +238,20 @@ shared `renderMarkdownBody` helper used by the markdown-flavored targets.
 Shipped today: `claude` (`CLAUDE.md`), `agents` (`AGENTS.md`), `cursor`
 (`.cursorrules`), `gemini` (`GEMINI.md`) and `windsurf` (`.windsurfrules`).
 `TOOL_ADAPTERS` maps each detected AI tool to the adapter it needs (used by
-`vault setup`; see the per-tool table above). Adding a new tool means writing
+`clanker setup`; see the per-tool table above). Adding a new tool means writing
 one more adapter file and registering it, nothing else in the CLI or
 compiler needs to change.
 
 ## Sync
 
-`vault sync` reconciles a vault edited from more than one device, without
+`clanker sync` reconciles a vault edited from more than one device, without
 git. In folder mode there is no server and no cloud account: the remote is
 just a folder, so anything that already keeps a folder in sync between your
 machines works, iCloud Drive, Dropbox, a NAS mount, a USB drive. The http
-mode below (see Self-hosting) talks to your own self-hosted `vault serve`
-instead. `vault` only ever writes encrypted objects into whichever remote you
+mode below (see Self-hosting) talks to your own self-hosted `clanker serve`
+instead. `clanker` only ever writes encrypted objects into whichever remote you
 configured; the storage side (v1 ships `dir`, a plain directory backend, and
-`http`, talking to `vault serve`) is a small pluggable interface, open to
+`http`, talking to `clanker serve`) is a small pluggable interface, open to
 further backends without changing anything else.
 
 Everything that leaves this machine is end-to-end encrypted first: file
@@ -260,7 +265,7 @@ Setup on two devices, once each, pointing at the same remote path with the
 same passphrase:
 
 ```bash
-vault sync setup --path /path/to/shared/folder --passphrase <same-on-every-device>
+clanker sync setup --path /path/to/shared/folder --passphrase <same-on-every-device>
 ```
 
 Omit `--passphrase` and set `VAULT_PASSPHRASE` in your shell environment
@@ -271,9 +276,9 @@ machines decrypt each other's objects and is never itself transmitted.
 Then, on any device:
 
 ```bash
-vault sync              # one-shot: pull and push whatever changed, print a summary
-vault sync --watch      # keep running: initial sync, then sync on every local change
-                         # (1.5s debounce) plus a periodic sync every --interval seconds (default 30)
+clanker sync              # one-shot: pull and push whatever changed, print a summary
+clanker sync --watch      # keep running: initial sync, then sync on every local change
+                           # (1.5s debounce) plus a periodic sync every --interval seconds (default 30)
 ```
 
 `--watch` runs until you stop it (Ctrl+C) and is meant for a machine you
@@ -285,7 +290,7 @@ each record is its own file with a generated name, so two devices adding
 records under `records/` never collide. A true conflict can only happen on
 a file you hand-edit directly and that keeps the same path across devices,
 `state.md`, `me/profile.md`, a project's `project.md`, or `vault.yaml`,
-when both devices change it since the last sync. `vault sync` resolves that
+when both devices change it since the last sync. `clanker sync` resolves that
 with last-write-wins by modification time, and the losing version is never
 silently discarded: it is written next to the file it lost to as a
 timestamped `<name>.conflict-<device>-<stamp>.md` copy, which also syncs to
@@ -308,7 +313,7 @@ of `VAULT_PASSPHRASE`, sits in `device.yaml` in plaintext on that device.
 
 ## MCP server
 
-`vault compile` writes files once, ahead of time; `vault mcp` serves the
+`clanker compile` writes files once, ahead of time; `clanker mcp` serves the
 vault live, on demand, to anything that speaks the Model Context Protocol
 (spec §5). This is the path for chat assistants that cannot read a compiled
 file off disk, and for any setup running multiple accounts of the same
@@ -316,14 +321,14 @@ assistant, since each MCP client identifies itself in the handshake and gets
 its own provenance trail on what it wrote, rather than every account sharing
 one compiled file.
 
-Run it with `vault mcp`, or point a client at it directly. For Claude
+Run it with `clanker mcp`, or point a client at it directly. For Claude
 Desktop or Claude Code, add to the MCP server config:
 
 ```json
 {
   "mcpServers": {
-    "vault": {
-      "command": "vault",
+    "clankervault": {
+      "command": "clanker",
       "args": ["mcp", "--vault", "/path/to/your/vault"]
     }
   }
@@ -345,7 +350,7 @@ Four tools are exposed:
 **Trust model.** A record written through `remember` is saved with
 `status: unconfirmed` and provenance `source.tool: mcp:<client-name>`, and it
 stays out of every compiled file and out of `get_context` until a human runs
-`vault confirm <id>`, the same gate that already applies to any other
+`clanker confirm <id>`, the same gate that already applies to any other
 unconfirmed record. An assistant proposing memory about you can never make
 that memory take effect on its own. `get_context` also takes a `lenses`
 argument: pass `lenses: false` when you want project facts and state without
@@ -354,14 +359,14 @@ someone else or paste somewhere less private.
 
 ## Self-hosting
 
-`vault serve` runs a small server that gives you two things from one process:
+`clanker serve` runs a small server that gives you two things from one process:
 an encrypted sync remote (the `--url` alternative to a shared folder, see
 Sync above) and a remote MCP endpoint at `/v1/mcp` for chat assistants that
-can reach the network but cannot launch a local `vault mcp` stdio process,
+can reach the network but cannot launch a local `clanker mcp` stdio process,
 a hosted assistant, a phone, a teammate's machine.
 
 ```bash
-vault serve --data /path/to/server-data --port 8484
+clanker serve --data /path/to/server-data --port 8484
 ```
 
 **Token model.** Every request needs `Authorization: Bearer <token>`. The
@@ -374,12 +379,12 @@ per server, shared across every device you point at it.
 Point a device at it the same way you would a shared folder:
 
 ```bash
-vault sync setup --url https://your-server:8484 --token <token> --passphrase <same-on-every-device>
-vault sync
+clanker sync setup --url https://your-server:8484 --token <token> --passphrase <same-on-every-device>
+clanker sync
 ```
 
 **The E2E tradeoff.** By default, with no `VAULT_PASSPHRASE` in the server's
-own environment, `vault serve` is a pure ciphertext store: exactly like
+own environment, `clanker serve` is a pure ciphertext store: exactly like
 syncing over a folder, it never sees plaintext, and `/v1/mcp` answers `503`
 rather than pretending to work. Setting `VAULT_PASSPHRASE` on the server
 enables `/v1/mcp`: the server decrypts a private working copy for itself
@@ -402,17 +407,17 @@ makes remote MCP a single-tenant convenience for one operator's own devices,
 not something built to serve many simultaneous users at scale.
 
 **Docker.** The image builds from source (`npm ci`, `tsc`, then
-`npm prune --omit=dev`) and its entrypoint is `vault serve --data /data
+`npm prune --omit=dev`) and its entrypoint is `clanker serve --data /data
 --port 8484`:
 
 ```bash
-docker build -t vault-server .
+docker build -t clankervault-server .
 docker run -d \
   -p 8484:8484 \
-  -v vault-data:/data \
+  -v clankervault-data:/data \
   -e VAULT_SERVER_TOKEN=<pick-a-long-random-token> \
   -e VAULT_PASSPHRASE=<optional, enables remote MCP> \
-  vault-server
+  clankervault-server
 ```
 
 `/data` holds the ciphertext store, the token file if you did not supply
@@ -420,15 +425,15 @@ one, and, only when `VAULT_PASSPHRASE` is set, the decrypted replica: back
 it up like a vault, and treat the container's filesystem like you would any
 server that can hold decrypted user data when that variable is set.
 
-This is the self-hostable half of what a hosted vault service would need,
-one server, one token, your own machine or VPS. Running this for other
+This is the self-hostable half of what a hosted Clankervault service would
+need, one server, one token, your own machine or VPS. Running this for other
 people, multi-tenant accounts, billing, TLS termination, one-click deploy,
 is not built here; it is the natural paid tier on top, not a requirement to
-use vault yourself.
+use Clankervault yourself.
 
 ## Mining
 
-`vault mine` finds durable, reusable knowledge already sitting in your AI
+`clanker mine` finds durable, reusable knowledge already sitting in your AI
 coding sessions and proposes it as `unconfirmed` records, so you do not have
 to write everything into the vault by hand. The first reader is Claude Code:
 it reads the JSONL transcripts Claude Code already keeps under
@@ -449,9 +454,9 @@ instructions to follow, and asks for at most five items and an empty array
 over noise.
 
 ```bash
-vault mine                 # one pass over new transcript data
-vault mine --dry-run       # show what would be created, write nothing
-vault mine --watch         # keep running, mine every --interval seconds (default 300)
+clanker mine                 # one pass over new transcript data
+clanker mine --dry-run       # show what would be created, write nothing
+clanker mine --watch         # keep running, mine every --interval seconds (default 300)
 ```
 
 Mined records are born `unconfirmed`, carry
@@ -459,16 +464,16 @@ Mined records are born `unconfirmed`, carry
 and never compile or show up in `get_context` until a human confirms them,
 same as anything the MCP server proposes. Something that contradicts an
 existing record comes back tagged `contradicts`, its body prefixed with
-`Contradicts: <old title>`, for you to resolve by hand with `vault supersede`;
+`Contradicts: <old title>`, for you to resolve by hand with `clanker supersede`;
 mined data never auto-supersedes a confirmed record.
 
-Two ways out of `unconfirmed`: `vault confirm <id>` by hand, or
-`vault settle --days <n>` (default 14), which confirms every `unconfirmed`,
+Two ways out of `unconfirmed`: `clanker confirm <id>` by hand, or
+`clanker settle --days <n>` (default 14), which confirms every `unconfirmed`,
 `confidence: high` record older than that many days, for one project with
-`--project` or across all of them without it. `vault settle` never touches
+`--project` or across all of them without it. `clanker settle` never touches
 medium- or low-confidence records, and never touches a record whose
 `source.tool` starts with `mcp`: anything an assistant proposed live through
-the MCP server still needs an explicit `vault confirm`.
+the MCP server still needs an explicit `clanker confirm`.
 
 Per-file offsets live in `.mine/offsets.json`, already on the sync exclusion
 list (per-device, like `device.yaml`), since what a given machine has
@@ -482,12 +487,12 @@ phase 4 (mining) and phase 5 (the self-hostable server: HTTP sync remote plus
 remote MCP endpoint, see Self-hosting above) are implemented and tested.
 Still out of scope, and coming later:
 
-- **More mining readers**: `vault setup` already reads `cwd` out of Codex
-  session logs to discover and register projects, but `vault mine` itself
+- **More mining readers**: `clanker setup` already reads `cwd` out of Codex
+  session logs to discover and register projects, but `clanker mine` itself
   still only extracts records from Claude Code transcripts. A Codex reader,
   and eventually Cursor, best-effort, is meant to slot in behind the same
-  reader/extractor interfaces without changing `vault mine` or the CLI.
-- **Hosted, multi-tenant service**: someone else's `vault serve` running
+  reader/extractor interfaces without changing `clanker mine` or the CLI.
+- **Hosted, multi-tenant service**: someone else's `clanker serve` running
   your vault for you, with accounts, billing and TLS handled for you. The
   server code for that already exists and is self-hostable today; only the
   multi-tenant operation of it is not built, and is the natural paid tier.

@@ -50,7 +50,7 @@ describe('vault sync CLI', () => {
     run(['init', vault]);
     const r = run(['--vault', vault, 'sync']);
     expect(r.code).toBe(1);
-    expect(r.out).toMatch(/vault sync setup/);
+    expect(r.out).toMatch(/clanker sync setup/);
   });
 
   it('fails cleanly, no stack trace, when the configured passphrase is wrong', () => {

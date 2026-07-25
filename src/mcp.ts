@@ -57,10 +57,10 @@ function gatherMeOnly(vaultDir: string): string {
  * descriptions to the model. Teaches the get_context / remember loop up front.
  */
 const SERVER_INSTRUCTIONS =
-  "This server is the user's portable memory vault. Call get_context once at the start of every conversation to learn who the user is and what they are working on. When the user states a durable fact, decision, recipe or preference, save it with remember. Records you save stay pending until the user confirms them.";
+  "This server is Clankervault, the user's portable memory. Call get_context once at the start of every conversation to learn who the user is and what they are working on. When the user states a durable fact, decision, recipe or preference, save it with remember. Records you save stay pending until the user confirms them.";
 
 export function buildServer(vaultDir: string): McpServer {
-  const server = new McpServer({ name: 'vault', version: '0.1.0' }, { instructions: SERVER_INSTRUCTIONS });
+  const server = new McpServer({ name: 'clankervault', version: '0.1.0' }, { instructions: SERVER_INSTRUCTIONS });
   const clientName = () => server.server.getClientVersion()?.name ?? 'unknown';
 
   const resolveRef = (ref?: string): ProjectInfo | null =>
@@ -130,7 +130,7 @@ export function buildServer(vaultDir: string): McpServer {
         confidence: 'high',
         source: { tool: `mcp:${clientName()}` },
       });
-      return text(`Saved ${rec.meta.id} as unconfirmed. It will not appear in compiled context until the user runs: vault confirm ${rec.meta.id}`);
+      return text(`Saved ${rec.meta.id} as unconfirmed. It will not appear in compiled context until the user runs: clanker confirm ${rec.meta.id}`);
     },
   );
 

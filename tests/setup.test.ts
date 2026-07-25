@@ -60,7 +60,7 @@ describe('vault setup wizard', () => {
 
     // cursor mcp.json wired
     const cursorMcp = JSON.parse(readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8'));
-    expect(cursorMcp.mcpServers.vault).toBeTruthy();
+    expect(cursorMcp.mcpServers.clankervault).toBeTruthy();
 
     // offsets fast-forwarded
     const offsets = JSON.parse(readFileSync(join(vault, '.mine', 'offsets.json'), 'utf8'));
@@ -75,10 +75,10 @@ describe('vault setup wizard', () => {
 
     // refresh daemon plist written (darwin only; this test machine is darwin)
     if (process.platform === 'darwin') {
-      const plist = readFileSync(join(home, 'Library', 'LaunchAgents', 'dev.vault.refresh.plist'), 'utf8');
+      const plist = readFileSync(join(home, 'Library', 'LaunchAgents', 'dev.clankervault.refresh.plist'), 'utf8');
       // launchd has a minimal PATH: the plist must invoke node absolutely, never rely on a shebang
       expect(plist).toContain(`<string>${process.execPath}</string>`);
-      expect(plist).not.toMatch(/<string>[^<]*\/vault<\/string>/);
+      expect(plist).not.toMatch(/<string>[^<]*\/clanker<\/string>/);
     }
   });
 
@@ -165,7 +165,7 @@ describe('vault setup wizard', () => {
     // the broken file is byte-identical, no backup was made for it
     expect(readFileSync(settingsFile, 'utf8')).toBe(invalidJson);
     expect(existsSync(`${settingsFile}.bak-vault`)).toBe(false);
-    expect(r.out).toMatch(/warning:.*settings\.json is not valid JSON.*re-run vault setup.*NOT touched/);
+    expect(r.out).toMatch(/warning:.*settings\.json is not valid JSON.*re-run clanker setup.*NOT touched/);
 
     // other, independent action groups still went through
     expect(existsSync(join(vault, 'vault.yaml'))).toBe(true);
@@ -193,6 +193,23 @@ describe('vault setup wizard', () => {
     const vaultHooks = commands.filter((c) => c.includes('vault') && c.includes('compile'));
     expect(vaultHooks.length).toBe(1);
     expect(vaultHooks[0]).not.toBe(staleCommand);
+  });
+
+  it('replaces a stale mcpServers.vault entry with mcpServers.clankervault, keyed by the vault/clanker footprint', () => {
+    const home = tmpDir();
+    const vault = join(tmpDir(), 'v');
+    mkdirSync(join(home, '.cursor'), { recursive: true });
+    writeFileSync(
+      join(home, '.cursor', 'mcp.json'),
+      JSON.stringify({ mcpServers: { vault: { command: '/old/moved/path/vault', args: ['mcp'] } } }),
+    );
+
+    const r = run(['setup', '--yes'], home, vault);
+    expect(r.code).toBe(0);
+
+    const cursorMcp = JSON.parse(readFileSync(join(home, '.cursor', 'mcp.json'), 'utf8'));
+    expect(cursorMcp.mcpServers.clankervault).toBeTruthy();
+    expect(cursorMcp.mcpServers.vault).toBeUndefined();
   });
 
   it('exits 0 without hanging when the first prompt is declined, with no vault ever created', () => {
@@ -243,8 +260,8 @@ describe('vaultBin formatting surfaces', () => {
   });
 
   it('mcpServerConfig on a plain resolved binary is just { command, args: ["mcp"] }', () => {
-    const bin: VaultBin = { command: '/Users/mac/.npm-global/bin/vault', args: [] };
-    expect(mcpServerConfig(bin)).toEqual({ command: '/Users/mac/.npm-global/bin/vault', args: ['mcp'] });
+    const bin: VaultBin = { command: '/Users/mac/.npm-global/bin/clanker', args: [] };
+    expect(mcpServerConfig(bin)).toEqual({ command: '/Users/mac/.npm-global/bin/clanker', args: ['mcp'] });
   });
 });
 

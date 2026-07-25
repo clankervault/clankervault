@@ -16,7 +16,7 @@ export function isVault(dir: string): boolean {
 
 export function requireVault(dir: string): string {
   if (!isVault(dir)) {
-    throw new Error(`No vault found at ${dir}. Run \`vault init\` first (or set VAULT_DIR).`);
+    throw new Error(`No vault found at ${dir}. Run \`clanker init\` first (or set VAULT_DIR).`);
   }
   return dir;
 }

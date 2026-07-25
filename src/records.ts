@@ -84,7 +84,7 @@ export function listRecords(vaultDir: string, projectId: string): VaultRecord[] 
     const r = parseRecordFile(path);
     // a stray non-record file (hand-dropped notes etc.) must not break list/compile
     if (typeof r.meta.id !== 'string' || !r.meta.id || !RECORD_TYPES.includes(r.meta.type)) {
-      console.error(`vault: skipping ${path}: not a vault record (missing id/type)`);
+      console.error(`clanker: skipping ${path}: not a vault record (missing id/type)`);
       continue;
     }
     records.push(r);
