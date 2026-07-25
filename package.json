@@ -30,5 +30,26 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clankervault/clankervault.git"
+  },
+  "homepage": "https://clankervault.dev",
+  "bugs": {
+    "url": "https://github.com/clankervault/clankervault/issues"
+  },
+  "keywords": [
+    "ai",
+    "memory",
+    "mcp",
+    "claude",
+    "codex",
+    "cursor",
+    "agents",
+    "claude-md",
+    "agents-md",
+    "portable-memory",
+    "context"
+  ]
 }

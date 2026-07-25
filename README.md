@@ -1,5 +1,9 @@
 # Clankervault
 
+[![CI](https://github.com/clankervault/clankervault/actions/workflows/ci.yml/badge.svg)](https://github.com/clankervault/clankervault/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/clankervault)](https://www.npmjs.com/package/clankervault)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Wherever you talk to AI, you're talking to someone who knows you.
 
 **Clankervault** is a portable memory layer for AI coding and creative tools. You
