@@ -1,6 +1,6 @@
 {
   "name": "clankervault",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Clankervault: portable memory for AI tools, compiled from one plain-markdown vault into CLAUDE.md, AGENTS.md, .cursorrules and more.",
   "license": "MIT",
   "type": "module",
