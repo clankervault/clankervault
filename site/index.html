@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clankervault - one memory for all your AI tools</title>
+<meta name="description" content="A portable memory your AI tools share. One folder of plain markdown, compiled into CLAUDE.md, AGENTS.md, .cursorrules and served over MCP. Open source, MIT, no account.">
+<meta property="og:title" content="Clankervault - one memory for all your AI tools">
+<meta property="og:description" content="One folder of plain markdown that Claude Code, Codex, Cursor, Gemini and chat assistants all read. Open source, MIT, no account.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://clankervault.dev">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#FF4D00">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #FAF6EF;
+    --ink: #16130E;
+    --ink-soft: #4C463C;
+    --accent: #FF4D00;
+    --accent-dim: #FFE8DE;
+    --line: #16130E;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+    --sans: "Bricolage Grotesque", system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent); color: var(--paper); }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* hazard stripe */
+  .stripe {
+    height: 14px;
+    background: repeating-linear-gradient(-45deg, var(--ink) 0 16px, var(--accent) 16px 32px);
+  }
+
+  /* ---------- nav ---------- */
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 0; border-bottom: 2px solid var(--line);
+  }
+  .wordmark {
+    font-weight: 800; font-size: 20px; letter-spacing: -0.02em;
+    text-transform: uppercase; text-decoration: none; color: var(--ink);
+  }
+  .wordmark span { color: var(--accent); }
+  .nav-links { display: flex; gap: 20px; align-items: center; }
+  .nav-links a {
+    color: var(--ink); text-decoration: none; font-weight: 600; font-size: 15px;
+    border-bottom: 2px solid transparent;
+  }
+  .nav-links a:hover { border-bottom-color: var(--accent); }
+
+  /* ---------- hero ---------- */
+  header { padding: 72px 0 56px; position: relative; overflow: hidden; }
+  .kicker {
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent);
+    margin-bottom: 22px;
+  }
+  h1 {
+    font-size: clamp(40px, 7.2vw, 84px);
+    font-weight: 800; line-height: 0.98; letter-spacing: -0.03em;
+    max-width: 15ch;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .hero-sub {
+    margin-top: 28px; max-width: 56ch; font-size: 19px; color: var(--ink-soft);
+  }
+  .hero-cta { margin-top: 36px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .install {
+    font-family: var(--mono); font-size: 15px; font-weight: 500;
+    background: var(--ink); color: var(--paper);
+    padding: 14px 18px; border: 2px solid var(--ink);
+    display: inline-flex; gap: 12px; align-items: center; cursor: pointer;
+  }
+  .install .dollar { color: var(--accent); user-select: none; }
+  .install:hover { background: var(--accent); border-color: var(--accent); }
+  .ghost {
+    font-weight: 700; font-size: 15px; color: var(--ink); text-decoration: none;
+    padding: 13px 18px; border: 2px solid var(--ink);
+  }
+  .ghost:hover { background: var(--ink); color: var(--paper); }
+  .hero-note { margin-top: 16px; font-family: var(--mono); font-size: 13px; color: var(--ink-soft); }
+
+  /* ---------- pain strip ---------- */
+  .pain { border-top: 2px solid var(--line); border-bottom: 2px solid var(--line); }
+  .pain-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .pain-cell { padding: 26px 22px; border-left: 2px solid var(--line); }
+  .pain-cell:first-child { border-left: none; }
+  .pain-cell .who { font-family: var(--mono); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); }
+  .pain-cell p { margin-top: 8px; font-size: 15px; line-height: 1.45; }
+
+  /* ---------- sections ---------- */
+  section { padding: 72px 0; }
+  .sec-label {
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); margin-bottom: 14px;
+  }
+  h2 { font-size: clamp(28px, 4vw, 44px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; max-width: 22ch; }
+  .sec-sub { margin-top: 16px; max-width: 58ch; font-size: 17px; color: var(--ink-soft); }
+
+  /* flow diagram */
+  .flow { display: grid; grid-template-columns: 1fr auto 1fr; gap: 28px; align-items: center; margin-top: 44px; }
+  .card {
+    border: 2px solid var(--line); background: #fff;
+    box-shadow: 6px 6px 0 var(--ink);
+  }
+  .card-head {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 10px 14px; border-bottom: 2px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .card-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .card pre {
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.6; padding: 16px;
+    overflow-x: auto; white-space: pre;
+  }
+  .arrowcol { font-family: var(--mono); font-weight: 600; color: var(--accent); font-size: 22px; text-align: center; }
+  .arrowcol .lbl { display: block; font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; }
+  .targets { display: flex; flex-direction: column; gap: 10px; }
+  .chip {
+    font-family: var(--mono); font-size: 13.5px; font-weight: 600;
+    border: 2px solid var(--line); background: #fff; padding: 10px 14px;
+    display: flex; justify-content: space-between; gap: 14px;
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+  .chip small { color: var(--ink-soft); font-weight: 400; }
+  .chip.mcp { background: var(--accent-dim); }
+
+  /* terminal */
+  .term { margin-top: 44px; }
+  .term pre { font-size: 14px; }
+  .t-cmd { color: var(--accent); font-weight: 600; }
+  .t-dim { color: #8A8172; }
+  .cm { color: #8A8172; }
+  .hl { background: var(--accent-dim); }
+
+  /* two-col cards */
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 44px; align-items: start; }
+
+  /* honest list */
+  .honest { list-style: none; margin-top: 28px; display: grid; gap: 0; border: 2px solid var(--line); background: #fff; box-shadow: 6px 6px 0 var(--ink); }
+  .honest li { display: grid; grid-template-columns: 130px 1fr; border-top: 2px solid var(--line); }
+  .honest li:first-child { border-top: none; }
+  .honest .k { font-family: var(--mono); font-size: 13px; font-weight: 600; padding: 16px; border-right: 2px solid var(--line); background: var(--accent-dim); }
+  .honest .v { padding: 16px; font-size: 15.5px; }
+
+  /* big statement */
+  .statement { background: var(--ink); color: var(--paper); }
+  .statement h2 { max-width: 26ch; color: var(--paper); }
+  .statement h2 em { font-style: normal; color: var(--accent); }
+  .statement .sec-sub { color: #B8B0A2; }
+
+  footer { padding: 40px 0 56px; border-top: 2px solid var(--line); }
+  .foot { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; font-family: var(--mono); font-size: 13.5px; color: var(--ink-soft); }
+  .foot a { color: var(--ink); font-weight: 600; text-decoration: none; border-bottom: 2px solid var(--accent); }
+
+  /* reveal animation */
+  @media (prefers-reduced-motion: no-preference) {
+    .rise { opacity: 0; transform: translateY(14px); animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; }
+    .d1 { animation-delay: 0.05s; } .d2 { animation-delay: 0.15s; } .d3 { animation-delay: 0.25s; } .d4 { animation-delay: 0.35s; }
+    @keyframes rise { to { opacity: 1; transform: none; } }
+  }
+
+  @media (max-width: 900px) {
+    .pain-grid { grid-template-columns: 1fr 1fr; }
+    .pain-cell:nth-child(3) { border-left: none; }
+    .pain-cell { border-top: 2px solid var(--line); }
+    .pain-cell:nth-child(-n+2) { border-top: none; }
+    .flow { grid-template-columns: 1fr; }
+    .arrowcol { transform: rotate(90deg); padding: 6px 0; }
+    .arrowcol .lbl { transform: rotate(-90deg); display: inline-block; margin: 0 0 0 10px; }
+    .duo { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) {
+    .pain-grid { grid-template-columns: 1fr; }
+    .pain-cell { border-left: none; border-top: 2px solid var(--line); }
+    .pain-cell:first-child { border-top: none; }
+    .honest li { grid-template-columns: 1fr; }
+    .honest .k { border-right: none; border-bottom: 2px solid var(--line); }
+    section { padding: 52px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stripe"></div>
+
+<div class="wrap">
+  <nav>
+    <a class="wordmark" href="#">Clanker<span>vault</span></a>
+    <div class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="https://github.com/clankervault/clankervault">GitHub</a>
+    </div>
+  </nav>
+</div>
+
+<header>
+  <div class="wrap">
+    <div class="kicker rise d1">Portable memory for AI tools · Open source · MIT</div>
+    <h1 class="rise d2">One memory.<br>All your <em>clankers</em>.</h1>
+    <p class="hero-sub rise d3">
+      Every AI tool knows you differently today - and most don't know you at all.
+      Clankervault is one folder of plain markdown that all of them read:
+      who you are, how you work, what you decided and why. On every machine,
+      in every account, the same.
+    </p>
+    <div class="hero-cta rise d4">
+      <button class="install" onclick="copyInstall(this)"><span class="dollar">$</span> npm i -g clankervault &amp;&amp; clanker setup</button>
+      <a class="ghost" href="https://github.com/clankervault/clankervault">Read the source</a>
+    </div>
+    <p class="hero-note rise d4">No account. No cloud. Your files, on your disk, in a format you can read with <code>cat</code>.</p>
+  </div>
+</header>
+
+<div class="pain">
+  <div class="wrap">
+    <div class="pain-grid">
+      <div class="pain-cell">
+        <div class="who">Claude Code</div>
+        <p>on your other machine has no idea what you started yesterday.</p>
+      </div>
+      <div class="pain-cell">
+        <div class="who">Cursor</div>
+        <p>doesn't know why you built things the way you built them.</p>
+      </div>
+      <div class="pain-cell">
+        <div class="who">ChatGPT</div>
+        <p>doesn't remember you from the last six months.</p>
+      </div>
+      <div class="pain-cell">
+        <div class="who">Every session</div>
+        <p>everything you ever cleared up with them died when the window closed.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <div class="sec-label">The mechanic</div>
+    <h2>A vault is the database. Their context files are just views.</h2>
+    <p class="sec-sub">
+      You keep one readable folder. <code>clanker compile</code> renders it into the
+      native file each tool already loads automatically - so your agents don't need
+      to learn anything. They just wake up knowing you.
+    </p>
+
+    <div class="flow">
+      <div class="card">
+        <div class="card-head">~/vault <span class="dot"></span></div>
+        <pre>vault/
+├── me/
+│   ├── profile.md
+│   └── taste/
+└── projects/
+    └── cettra/
+        ├── project.md
+        ├── records/
+        │   └── ...one file
+        │      per fact
+        └── state.md</pre>
+      </div>
+      <div class="arrowcol">-&gt;<span class="lbl">clanker compile</span></div>
+      <div class="targets">
+        <div class="chip">CLAUDE.md <small>Claude Code</small></div>
+        <div class="chip">AGENTS.md <small>Codex &amp; friends</small></div>
+        <div class="chip">.cursorrules <small>Cursor</small></div>
+        <div class="chip">GEMINI.md <small>Gemini CLI</small></div>
+        <div class="chip">.windsurfrules <small>Windsurf</small></div>
+        <div class="chip mcp">MCP server <small>chat assistants</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top: 0;">
+  <div class="wrap">
+    <div class="sec-label">Setup is one command</div>
+    <h2>It finds your tools and your projects by itself.</h2>
+    <p class="sec-sub">
+      <code>clanker setup</code> detects what's installed, discovers your projects
+      from real session transcripts, wires the hooks and MCP configs, and compiles
+      everything. Real output from a real machine:
+    </p>
+    <div class="card term">
+      <div class="card-head">clanker setup <span class="dot"></span></div>
+      <pre><span class="t-cmd">$ clanker setup</span>
+Detected tools: claude-code, codex, cursor, gemini, claude-desktop
+Registered project cettra (/Users/you/Development/cettra-eshop)
+Registered project verdikt (/Users/you/Development/verdikt-apps)
+Wired Claude Code SessionStart hook
+Wired Claude Desktop MCP config
+Wired Cursor MCP config
+Fast-forwarded 790 transcript(s); mining starts fresh from here.
+<span class="t-dim">skipped ~/Development/studio/CLAUDE.md: existing file is not
+clankervault-generated (use --force to overwrite)</span>
+Compiled 14 project(s).</pre>
+    </div>
+    <p class="hero-note">That skipped line is a feature: it never overwrites a context file you wrote by hand.</p>
+  </div>
+</section>
+
+<section style="padding-top: 0;">
+  <div class="wrap">
+    <div class="sec-label">The format</div>
+    <h2>One file per thing you know. Owned by you, readable forever.</h2>
+    <div class="duo">
+      <div class="card">
+        <div class="card-head">records/2026-07-12-export-shorts.md <span class="dot"></span></div>
+        <pre><span class="cm">---
+type: recipe
+status: confirmed
+source: <span class="hl">claude-code</span>   # where it came from
+tags: [ffmpeg, shorts]
+---</span>
+
+# Export shorts
+
+## How
+`ffmpeg -crf 18 -preset slow`
+
+## Why
+CRF 23 blurred the text after
+the platform recompressed it.
+18 is verified sharp.</pre>
+      </div>
+      <div>
+        <ul class="honest">
+          <li><div class="k">append-only</div><div class="v">Changing your mind creates a new record and links the old one. History for free, zero sync conflicts.</div></li>
+          <li><div class="k">provenance</div><div class="v">Every record knows where it came from. Nothing an assistant writes reaches your context until you confirm it.</div></li>
+          <li><div class="k">yours</div><div class="v">If Clankervault disappears tomorrow, your memory is still a folder of markdown that opens in anything.</div></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="statement">
+  <div class="wrap">
+    <div class="sec-label">Mining</div>
+    <h2>And you don't have to write it. <em>Your sessions write it for you.</em></h2>
+    <p class="sec-sub">
+      <code>clanker mine</code> distills decisions, recipes and work-in-progress out of
+      your AI session transcripts - starting with Claude Code, more tools on the way.
+      Everything mined lands as a pending record: nothing settles into your memory
+      without your say.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-label">Everywhere you work</div>
+    <h2>Synced between machines. Encrypted end to end.</h2>
+    <div class="duo">
+      <div>
+        <ul class="honest">
+          <li><div class="k">sync</div><div class="v">Any shared folder works as the remote today: iCloud Drive, Dropbox, a NAS, a USB stick. Or run your own <code>clanker serve</code>. The remote only ever sees ciphertext.</div></li>
+          <li><div class="k">conflicts</div><div class="v">Append-only records merge cleanly. When two machines edit the same file, the newer wins and the loser is kept next to it. Never silent loss.</div></li>
+          <li><div class="k">chat apps</div><div class="v">Over MCP your memory reaches chat assistants too - Claude Desktop and Claude Code today; ChatGPT and Gemini as soon as the hosted endpoint ships.</div></li>
+        </ul>
+      </div>
+      <div class="card term">
+        <div class="card-head">two machines, one memory <span class="dot"></span></div>
+        <pre><span class="t-cmd">macbook $</span> clanker add fact "Deploy on Vercel"
+<span class="t-cmd">macbook $</span> clanker sync
+synced: 5 up, 0 down, 0 conflicts
+
+<span class="t-cmd">mini $</span> clanker sync
+synced: 0 up, 3 down, 0 conflicts
+<span class="t-cmd">mini $</span> clanker list -p demo
+fct-2026-07-24  [confirmed]  Deploy on Vercel
+
+<span class="t-dim"># what the cloud folder sees:</span>
+<span class="t-cmd">cloud $</span> ls objects/ | head -2
+435f9bc30a013f8bf673226f...
+8ab16c62d4a94dbdb00d1056...</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="stripe"></div>
+
+<section>
+  <div class="wrap" style="text-align: left;">
+    <h2 style="max-width: 28ch;">Wherever you talk to AI, you're talking to someone who knows you.</h2>
+    <div class="hero-cta">
+      <button class="install" onclick="copyInstall(this)"><span class="dollar">$</span> npm i -g clankervault &amp;&amp; clanker setup</button>
+      <a class="ghost" href="https://github.com/clankervault/clankervault">Star on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>MIT licensed. The format is yours; the paid part will be hosted sync, never your data.</div>
+    <div>Built by <a href="https://x.com/TedyRaska">Tadeáš</a> · <a href="https://github.com/clankervault/clankervault">GitHub</a></div>
+  </div>
+</footer>
+
+<script>
+function copyInstall(btn) {
+  navigator.clipboard.writeText('npm i -g clankervault && clanker setup').then(() => {
+    const prev = btn.innerHTML;
+    btn.innerHTML = '<span class="dollar">$</span> copied to clipboard';
+    setTimeout(() => { btn.innerHTML = prev; }, 1400);
+  });
+}
+</script>
+</body>
+</html>
