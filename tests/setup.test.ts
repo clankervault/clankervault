@@ -173,6 +173,23 @@ describe('vault setup wizard', () => {
     expect(list.out).toMatch(/work/);
   });
 
+  it('never proposes a discovered parent directory of an already-registered project root', () => {
+    const home = tmpDir();
+    const vault = join(tmpDir(), 'v');
+    const parent = join(tmpDir(), 'studio');
+    const child = join(parent, 'engines', 'motion');
+    mkdirSync(child, { recursive: true });
+    // child is registered first (by hand), parent shows up in transcripts
+    run(['init', vault], home, vault);
+    run(['project', 'new', 'Motion', '--root', child], home, vault);
+    fabricateClaudeTranscript(home, '-x-studio', parent);
+    const r = run(['setup', '--yes'], home, vault);
+    expect(r.code).toBe(0);
+    const list = run(['project', 'list'], home, vault);
+    expect(list.out).toMatch(/motion/);
+    expect(list.out).not.toMatch(/studio/);
+  });
+
   it('replaces a stale hook entry in place instead of appending a duplicate, keyed by a stable vault+compile marker', () => {
     const home = tmpDir();
     const vault = join(tmpDir(), 'v');
@@ -190,7 +207,7 @@ describe('vault setup wizard', () => {
     const commands: string[] = settings.hooks.SessionStart.flatMap((g: { hooks: { command: string }[] }) =>
       g.hooks.map((h) => h.command),
     );
-    const vaultHooks = commands.filter((c) => c.includes('vault') && c.includes('compile'));
+    const vaultHooks = commands.filter((c) => (c.includes('vault') || c.includes('clanker')) && c.includes('compile'));
     expect(vaultHooks.length).toBe(1);
     expect(vaultHooks[0]).not.toBe(staleCommand);
   });

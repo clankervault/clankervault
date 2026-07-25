@@ -3,7 +3,7 @@ import {
   closeSync, existsSync, mkdirSync, openSync, readSync, readFileSync, readdirSync,
   realpathSync, statSync, writeFileSync,
 } from 'node:fs';
-import { dirname, basename, join, resolve } from 'node:path';
+import { dirname, basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileAll } from './compile.js';
 import { createProject, listProjects } from './project.js';
@@ -252,6 +252,10 @@ export function buildPlan(home: string, vaultDir: string): SetupPlan {
 
   const newProjects = discovered
     .filter((d) => !existingRoots.has(d.cwd))
+    // also drop a discovered dir that CONTAINS an already-registered root: registering
+    // the parent (e.g. a studio monorepo above a registered engine) would shadow the
+    // child in cwd resolution and misattribute its records
+    .filter((d) => ![...existingRoots].some((root) => root.startsWith(d.cwd + sep)))
     .map((d) => ({ cwd: d.cwd, name: basename(d.cwd) }));
 
   const adapterSet = new Set<string>();
