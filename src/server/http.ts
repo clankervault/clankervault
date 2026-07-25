@@ -208,7 +208,7 @@ export function createVaultServer(opts: VaultServerOptions): Server {
     return got.length === expected.length && timingSafeEqual(got, expected);
   };
 
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     try {
       const path = new URL(req.url ?? '/', 'http://localhost').pathname;
       if (!path.startsWith('/v1/')) return sendJson(res, 404, { error: 'not found' });
@@ -289,5 +289,11 @@ export function createVaultServer(opts: VaultServerOptions): Server {
       console.error('clankervault server error:', err);
       sendJson(res, 500, { error: 'internal error' });
     }
-  });
+    });
+  // serialized MCP queue processing can hold a client's keep-alive socket idle for
+  // longer than node's 5s default; closing it mid-POST surfaces as ECONNRESET on
+  // slow machines, and POSTs are never retried. Keep sockets alive well past that.
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+  return server;
 }
