@@ -182,7 +182,7 @@ describe('remote MCP endpoint', () => {
     expect(cli(['--vault', reader, 'sync']).code).toBe(0);
     const secondList = cli(['--vault', reader, 'list', '-p', 'demo']).out;
     for (const title of titles) expect(secondList).toContain(title);
-  });
+  }, 60000);   // five serialized MCP writes + syncs: comfortably over vitest's 5s default on slow CI runners
 
   it('survives a corrupted store manifest instead of crashing the process', async () => {
     // a DEDICATED server + data dir: fresh() has never run on its Replica yet
