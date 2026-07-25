@@ -15,7 +15,7 @@ function cli(args: string[], env: Record<string, string> = {}) {
   return { code: r.status, out: r.stdout + r.stderr };
 }
 
-/** spawn a real `vault serve` subprocess on an OS-assigned port and resolve once its
+/** spawn a real `clanker serve` subprocess on an OS-assigned port and resolve once its
  *  startup line is seen; shared by every test in this file that needs its own server */
 async function spawnVaultServer(dataDir: string, env: Record<string, string>): Promise<{ proc: ChildProcess; base: string }> {
   const child = spawn('npx', ['tsx', join(process.cwd(), 'src/cli.ts'), 'serve', '--data', dataDir, '--port', '0'], {
@@ -112,7 +112,7 @@ describe('remote MCP endpoint', () => {
       params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'remote-test', version: '1.0.0' } },
     });
     expect(init.status).toBe(200);
-    expect(init.json.result.serverInfo.name).toBe('vault');
+    expect(init.json.result.serverInfo.name).toBe('clankervault');
     expect(init.sessionId).toBeTruthy();
 
     const call = await mcp(mcpBase, TOKEN, {
@@ -224,7 +224,7 @@ describe('remote MCP endpoint', () => {
         params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'crash-test', version: '1.0.0' } },
       });
       expect(recovered.status).toBe(200);
-      expect(recovered.json.result.serverInfo.name).toBe('vault');
+      expect(recovered.json.result.serverInfo.name).toBe('clankervault');
     } finally {
       crashProc.kill();
     }

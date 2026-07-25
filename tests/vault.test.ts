@@ -34,7 +34,7 @@ describe('readConfig', () => {
 
 describe('requireVault', () => {
   it('throws a helpful error outside a vault', () => {
-    expect(() => requireVault(tmpDir())).toThrow(/vault init/);
+    expect(() => requireVault(tmpDir())).toThrow(/clanker init/);
   });
 });
 

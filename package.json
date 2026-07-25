@@ -1,11 +1,11 @@
 {
-  "name": "vault-cli",
+  "name": "clankervault",
   "version": "0.1.0",
-  "description": "Portable memory for AI tools: one plain-markdown vault, compiled into CLAUDE.md, AGENTS.md, .cursorrules and more.",
+  "description": "Clankervault: portable memory for AI tools, compiled from one plain-markdown vault into CLAUDE.md, AGENTS.md, .cursorrules and more.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "vault": "dist/cli.js"
+    "clanker": "dist/cli.js"
   },
   "files": [
     "dist"

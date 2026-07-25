@@ -79,7 +79,7 @@ export class DirBackend implements Backend {
   }
 }
 
-/** client side of the vault server's /v1/sync API; ciphertext in, ciphertext out */
+/** client side of the clankervault server's /v1/sync API; ciphertext in, ciphertext out */
 export class HttpBackend implements Backend {
   private base: string;
   constructor(url: string, private token: string) {

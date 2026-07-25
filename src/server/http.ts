@@ -185,8 +185,8 @@ async function handleMcpRequest(
   } catch (err) {
     console.error(
       isDecryptFailure(err)
-        ? 'vault server error: mcp write-back failed to decrypt (check VAULT_PASSPHRASE)'
-        : `vault server error (mcp write-back): ${err instanceof Error ? err.message : String(err)}`,
+        ? 'clankervault server error: mcp write-back failed to decrypt (check VAULT_PASSPHRASE)'
+        : `clankervault server error (mcp write-back): ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }
@@ -273,7 +273,7 @@ export function createVaultServer(opts: VaultServerOptions): Server {
         // promise being returned, is what actually keeps this response (and the
         // process) alive.
         return task.catch((err) => {
-          console.error('vault server error:', err);
+          console.error('clankervault server error:', err);
           if (res.headersSent) return;
           sendJson(res, 500, isDecryptFailure(err)
             ? { error: 'server cannot decrypt the store (check VAULT_PASSPHRASE on the server)' }
@@ -286,7 +286,7 @@ export function createVaultServer(opts: VaultServerOptions): Server {
       if (err instanceof BodyTooLargeError) return sendJson(res, 413, { error: 'body too large' });
       // never put filesystem paths, stack traces, or other internal detail in the response body -
       // the real error (which may embed on-disk paths from fs failures) is for the server log only
-      console.error('vault server error:', err);
+      console.error('clankervault server error:', err);
       sendJson(res, 500, { error: 'internal error' });
     }
   });
